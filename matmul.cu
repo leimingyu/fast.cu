@@ -41,8 +41,73 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 #define cudaCheck(err) (cudaCheck(err, __FILE__, __LINE__))
 
 
+//----------------------------------------------------------------------------//
+// wgmma related apis 
+//----------------------------------------------------------------------------//
+
 // wgmma example in bf16
 // #include "examples/matmul/matmul_2.cuh"
+
+using barrier = cuda::barrier<cuda::thread_scope_block>;
+namespace cde = cuda::device::experimental;
+
+__device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) { return (((x) & 0x3FFFF) >> 0x4); }
+
+__device__ uint64_t make_smem_desc(bf16* ptr) {
+    uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
+    uint64_t desc = 0x0000000000000000;
+    desc |= matrix_descriptor_encode(addr);
+    desc |= matrix_descriptor_encode((uint64_t)16) << 16;
+    desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
+    desc |= 1llu << 62; // 128B swizzle
+    return desc;
+  }
+
+__device__ void warpgroup_arrive() {
+    asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+}
+
+__device__ void warpgroup_commit_batch() {
+    asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+}
+
+template <int N>
+__device__ void warpgroup_wait() {
+    static_assert(N >= 0 && N <= 7, "WGMMA wait: N must be in range [0, 7]");
+    asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(N) : "memory");
+}
+
+template <int BlockMajorSize, int BlockMinorSize>
+void create_tensor_map(CUtensorMap *tma_map, bf16* gmem_ptr, int blocks_height, int blocks_width) {
+    void* gmem_address = (void*)gmem_ptr;
+    uint64_t gmem_prob_shape[5] = {(uint64_t)BlockMinorSize*blocks_width, (uint64_t)BlockMajorSize*blocks_height, 1, 1, 1};
+    uint64_t gmem_prob_stride[5] = {sizeof(bf16), sizeof(bf16) * BlockMinorSize*blocks_width, 0, 0, 0};
+    uint32_t smem_box_shape[5] = {uint32_t(BlockMinorSize), uint32_t(BlockMajorSize), 1, 1, 1};
+    uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
+
+    CUresult result = cuTensorMapEncodeTiled(
+        tma_map, CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 2, gmem_address, gmem_prob_shape,
+        gmem_prob_stride + 1, smem_box_shape, smem_box_stride, CU_TENSOR_MAP_INTERLEAVE_NONE,
+        CU_TENSOR_MAP_SWIZZLE_128B, CU_TENSOR_MAP_L2_PROMOTION_NONE, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+
+    assert(result == CUDA_SUCCESS);
+}
+
+
+// 
+template <int BlockMajorSize, int BlockMinorSize>
+__host__ static inline CUtensorMap* allocate_and_create_tensor_map(bf16* src, int blocks_height, int blocks_width) {
+    CUtensorMap *tma_map_d;
+    cudaMalloc(&tma_map_d, sizeof(CUtensorMap));
+    CUtensorMap tma_map_host;
+    create_tensor_map<BlockMajorSize, BlockMinorSize>(&tma_map_host, src, blocks_height, blocks_width);
+    cudaMemcpy(tma_map_d, &tma_map_host, sizeof(CUtensorMap), cudaMemcpyHostToDevice);
+    return tma_map_d;
+}
+
+//----------------------------------------------------------------------------//
+// gpu tests and kernels
+//----------------------------------------------------------------------------//
 
 
 template <typename Tinput, typename Toutput, int TILE_K>
@@ -759,7 +824,6 @@ int main(int argc, char **argv)
 #endif
       allTests_results[i] = current_result;
 
-      // break;
     }
 
 /*
@@ -804,50 +868,105 @@ void runTest(std::vector<Tinput> current_test_ab,
              std::vector<Toutput> &current_result)
 {
   //------------------------------------------------------------------------//
-  // cpu
+  // total workload size M 64 x N 8 x K 32 
   //------------------------------------------------------------------------//
-  std::cout << "Read inputs a/b" <<std::endl;
+  long max_size = 64;
+  long M = 64, N = 8, K = 32;
 
-  Tinput test_ops[TILE_K + TILE_K] = {0};
-  for (int i = 0; i < TILE_K * 2; i++)
+  //------------------------------------------------------------------------//
+  // prepare host buffers 
+  //------------------------------------------------------------------------//
+  Tinput *hA = nullptr;
+  Tinput *hB = nullptr;
+  Toutput *hC = nullptr;
+  Toutput *hD = nullptr;
+
+  size_t sizeA = M x K;
+  size_t sizeB = N x K;
+  size_t sizeCD = M x N;
+
+  hA = (uint8_t *)  malloc(sizeof(uint8_t) * sizeA );
+  hB = (uint8_t *)  malloc(sizeof(uint8_t) * sizeB );
+
+  hC = (uint32_t*)  malloc(sizeof(uint32_t) * sizeCD );
+  hD = (uint32_t*)  malloc(sizeof(uint32_t) * sizeCD );
+
+  // init to 0
+  memset(hA, 0, sizeof(uint8_t) * sizeA );
+  memset(hB, 0, sizeof(uint8_t) * sizeB );
+
+  memset(hC, 0, sizeof(uint32_t) * sizeCD );
+  memset(hD, 0, sizeof(uint32_t) * sizeCD );
+
+  //------------------------------------------------------------------------//
+  // read/set up data on cpu
+  //------------------------------------------------------------------------//
+  std::cout << "Read inputs a/b " <<std::endl;
+  // Tinput test_ops[TILE_K + TILE_K] = {0};
+  for (int i = 0; i < TILE_K; i++)
   {
-    test_ops[i] = current_test_ab[i];
+    hA[i] = current_test_ab[i*2];     //  read a
+    hB[i] = current_test_ab[i*2 + 1]; //  read b
   }
 
   std::cout << "Read input C" <<std::endl;
-  Toutput test_init_c = current_test_c;
+  // Toutput test_init_c = current_test_c;
+  hC[0] =  current_result_c;
 
-  // cpu buffer: two results in fp32
-  // 1st : dotproduct of (a, b)
-  // 2nd : dotproduct of (a, b) + C
-  Toutput *result_cpu = 0;
-  result_cpu = (Toutput *)malloc(sizeof(Toutput) * 2);
+
+  // // cpu buffer: two results in fp32
+  // // 1st : dotproduct of (a, b)
+  // // 2nd : dotproduct of (a, b) + C
+  // Toutput *result_cpu = 0;
+  // result_cpu = (Toutput *)malloc(sizeof(Toutput) * 2);
 
   //------------------------------------------------------------------------//
   // gpu buffer
   //------------------------------------------------------------------------//
-  Tinput  *test_inputs_ab = 0; // input on gpu
-  Toutput *test_inputs_c = 0;
+  // Tinput  *test_inputs_ab = 0; // input on gpu
+  // Toutput *test_inputs_c = 0;
+  // Toutput *result_gpu = 0; // output on gpu
 
-  Toutput *result_gpu = 0; // output on gpu
+  Tinput *dA = nullptr;
+  Tinput *dB = nullptr;
+  Toutput *dC = nullptr;
+  Toutput *dD = nullptr;
 
-  float *buf_fp32 = 0;
-  half *buf_fp16 = 0;
+  cudaMalloc((void **)&dA, sizeof(Tinput) * m * k);
+  cudaMalloc((void **)&dB, sizeof(Tinput) * k * n);
+  cudaMalloc((void **)&dC, sizeof(Toutput) * m * n);
+  cudaMalloc((void **)&dD, sizeof(Toutput) * m * n);
 
-  cudaMalloc((void **)&buf_fp32, sizeof(float) * 1024);
-  cudaMalloc((void **)&buf_fp16, sizeof(half) * 1024);
+  // float *buf_fp32 = 0;
+  // half *buf_fp16 = 0;
+  // cudaMalloc((void **)&buf_fp32, sizeof(float) * 1024);
+  // cudaMalloc((void **)&buf_fp16, sizeof(half) * 1024);
 
-  // input buffers
-  cudaMalloc((void **)&test_inputs_ab, sizeof(Tinput) * TILE_K * 2);
-  cudaMalloc((void **)&test_inputs_c, sizeof(Toutput));
-
-  // output buffer
-  cudaMalloc((void **)&result_gpu, sizeof(Toutput) * 2);
+  // // input buffers
+  // cudaMalloc((void **)&test_inputs_ab, sizeof(Tinput) * TILE_K * 2);
+  // cudaMalloc((void **)&test_inputs_c, sizeof(Toutput));
+  // // output buffer
+  // cudaMalloc((void **)&result_gpu, sizeof(Toutput) * 2);
 
   // h2d : copy input ops to gpu
-  cudaMemcpy(test_inputs_c, &test_init_c, sizeof(Toutput), cudaMemcpyHostToDevice);
-  cudaMemcpy(test_inputs_ab, test_ops, sizeof(Tinput) * TILE_K * 2, cudaMemcpyHostToDevice);
+  // cudaMemcpy(test_inputs_c, &test_init_c, sizeof(Toutput), cudaMemcpyHostToDevice);
+  // cudaMemcpy(test_inputs_ab, test_ops, sizeof(Tinput) * TILE_K * 2, cudaMemcpyHostToDevice);
+  cudaMemcpy(dA, hA, sizeof(Tinput) * m * k, cudaMemcpyHostToDevice);
+  cudaMemcpy(dB, hB, sizeof(Tinput) * k * n, cudaMemcpyHostToDevice);
 
+  cudaMemcpy(dC, hC, sizeof(Tinput) * m * k, cudaMemcpyHostToDevice);
+  cudaMemcpy(dD, hD, sizeof(Tinput) * k * n, cudaMemcpyHostToDevice);
+
+  constexpr int BM = 64;
+  constexpr int BN = 8;
+  constexpr int BK = 32;
+  constexpr int NUM_THREADS = 128;
+
+  CUtensorMap *d_tma_map_A = 0;
+  CUtensorMap *d_tma_map_B = 0;
+
+  d_tma_map_A = allocate_and_create_tensor_map<BM, BK>(dA, m / BM, k / BK);
+  d_tma_map_B = allocate_and_create_tensor_map<BN, BK>(dB, m / BN, k / BK);
   //------------------------------------------------------------------------//
   // 1 warpgroup = 128 threads 
   //------------------------------------------------------------------------//
