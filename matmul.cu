@@ -262,9 +262,20 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	// you'd map lane IDs carefully to store each portion of the 64x8 tile.
 	// For demonstration, we simply store c0,c1 from each thread to global mem.
 
-	// int store_idx = tid; // 0..127
-	// C[2 * store_idx + 0] = c0;
-	// C[2 * store_idx + 1] = c1;
+	int store_idx = tid; // 0..127
+	C[2 * store_idx + 0] = c0;
+	C[2 * store_idx + 1] = c1;
+
+	// print the lower half of c0
+	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
+    uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+    uint16_t c1_lo = static_cast<uint16_t>(c1 & 0xFFFF);
+    uint16_t c1_hi = static_cast<uint16_t>((c1 >> 16) & 0xFFFF);
+
+	if(tid == 0) {
+		// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
+		printf("[tid=%d] c0_lo=0x%04X \n", tid, c0_lo);
+	}
 }
 
 //----------------------------------------------------------------------------//
