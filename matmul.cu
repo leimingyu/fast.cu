@@ -208,7 +208,7 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	uint32_t c0 = 0u, c1 = 0u;
 
 	// Start the WGMMA group
-	// wgmma_fence();
+	wgmma_fence();
 
 	// // One wgmma call for the entire 64x8x32
 	// // scaleD=1 => accumulate with existing data in c0,c1
