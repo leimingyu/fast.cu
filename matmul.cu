@@ -284,17 +284,18 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	C[2 * store_idx + 0] = c0;
 	C[2 * store_idx + 1] = c1;
 
-	// // print the lower half of c0
-	// uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
-    // uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+	// print the lower half of c0
+	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
+    uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
     // uint16_t c1_lo = static_cast<uint16_t>(c1 & 0xFFFF);
     // uint16_t c1_hi = static_cast<uint16_t>((c1 >> 16) & 0xFFFF);
 
-	// if(tid == 0) {
-	// 	// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
-	// 	// printf("[tid=%d] c0_lo=0x%04X \n", tid, c0_lo);
-	// 	printf("[tid=%d] \n", tid);
-	// }
+	if(tid == 0) {
+		// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
+		printf("[tid=%d] c0_lo=0x%4X c0_hi=0x%4X  \n", tid, c0_lo, c0_hi);
+		// printf("[tid=%d] c0_lo=0x%4X \n", tid, c0_lo);
+		// printf("[tid=%d] \n", tid);
+	}
 }
 
 //----------------------------------------------------------------------------//
@@ -499,7 +500,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	// packed |= ((uint32_t)half_hi & 0xFFFF) << 16;    // put high half 
 	hD[0] = packed; 
 
-    printf("packed into 32bit : %08X \n", hD[0]);
+    printf("packed into 32bit : %08X \n\n", hD[0]);
 
 
 
