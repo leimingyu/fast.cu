@@ -170,6 +170,38 @@ __host__ static inline CUtensorMap* allocate_and_create_tensor_map(Tin* src, int
 }
 
 
+//////////////////////////////////////////////////////////////////////////////
+// Minimal inline PTX for wgmma.mma_async.sync.aligned.m64n8k32.f16.e5m2.e5m2
+// storing two 32-bit accumulators (c0, c1).
+//////////////////////////////////////////////////////////////////////////////
+
+// ref:  https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L19019C1-L19052C3
+
+template<int scaleD, int scaleA, int scaleB>
+__device__ __forceinline__
+void wgmma_m64n8k32_f16_e5m2_e5m2(
+    uint64_t descA,
+    uint64_t descB,
+    uint32_t &c0,
+    uint32_t &c1)
+{
+  // scaleD is turned into a predicate (p) in PTX:
+  // if scaleD != 0 => accumulate; else => overwrite
+  asm volatile(
+    "{\n"
+    "  .reg .pred p;\n"
+    "  setp.ne.b32 p, %4, 0;\n"
+    "  wgmma.mma_async.sync.aligned.m64n8k32.f16.e5m2.e5m2 "
+    "  { %0, %1 }, %2, %3, p, %5, %6;\n"
+    "}\n"
+    : "+r"(c0), "+r"(c1)
+    : "l"(descA), "l"(descB),
+      "n"((int32_t)scaleD),
+      "n"((int32_t)scaleA),
+      "n"((int32_t)scaleB)
+  );
+}
+
 // ---------------------------------------------------------------------
 // Kernel:	single block of 128 threads. We do a single 64x8x32 MMA
 // 			from FP8 E5M2 => accum in FP16, stored in two 32-bit regs.
@@ -205,24 +237,30 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/512);
 
 	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
-	uint32_t c0 = 0u, c1 = 0u;
+	// C is 64x8 , each warp read 16x8 of inputC, there are 32 threads per warp, so each fiber hold 4 input values.
+	// ideally, we would like fiber0 holds the 1st 2 inputs, the offset by 8x8 elements, hold the 2nd 2 inputs.
+
+	// here, fiber reads the 1st 2xfp16, and next 2xfp16
+	// noted that, we only care about the c0 input 
+	uint32_t c0 = C[2*tid + 0];
+	uint32_t c1 = C[2*tid + 1];
 
 	// Start the WGMMA group
 	wgmma_fence();
 
-	// // One wgmma call for the entire 64x8x32
-	// // scaleD=1 => accumulate with existing data in c0,c1
-	// // scaleA=1 => unscaled input A
-	// // scaleB=1 => unscaled input B
-	// wgmma_m64n8k32_f16_e5m2_e5m2(descA, descB, c0, c1, /*scaleD=*/1, /*scaleA=*/1, /*scaleB=*/1);
+	// One wgmma call for the entire 64x8x32
+	// scaleD=1 => accumulate with existing data in c0,c1
+	// scaleA=1 => unscaled input A
+	// scaleB=1 => unscaled input B
+	wgmma_m64n8k32_f16_e5m2_e5m2<1,1,1>(descA, descB, c0, c1);
 
-	// // Commit, then wait for group 0
-	// wgmma_commit_group();
-	// wgmma_wait_group<0>();
+	// Commit, then wait for group 0
+	wgmma_commit_group();
+	wgmma_wait_group<0>();
 
-	// // Now c0,c1 each hold two FP16 accumulators. In a real code,
-	// // you'd map lane IDs carefully to store each portion of the 64x8 tile.
-	// // For demonstration, we simply store c0,c1 from each thread to global mem.
+	// Now c0,c1 each hold two FP16 accumulators. In a real code,
+	// you'd map lane IDs carefully to store each portion of the 64x8 tile.
+	// For demonstration, we simply store c0,c1 from each thread to global mem.
 
 	// int store_idx = tid; // 0..127
 	// C[2 * store_idx + 0] = c0;
