@@ -83,34 +83,50 @@ void runTest(std::vector<uint8_t> current_test_ab,
 using barrier = cuda::barrier<cuda::thread_scope_block>;
 namespace cde = cuda::device::experimental;
 
-// why this desc encode?
-__device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) { return (((x) & 0x3FFFF) >> 0x4); }
+// ---------------------------------------------------------------------
+// Helpers to build SMEM descriptors with no swizzling
+// ---------------------------------------------------------------------
+__device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) {
+  return ((x & 0x3FFFFULL) >> 4);
+}
 
-// I think I need to change the connent given fp8 input, rather than direclty using bf16
-__device__ uint64_t make_smem_desc(uint8_t *ptr)
+__device__ uint64_t make_smem_desc(uint8_t *base_ptr, int ld_major, int ld_minor)
 {
-	uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
-	uint64_t desc = 0x0000000000000000;
-	desc |= matrix_descriptor_encode(addr);
-	desc |= matrix_descriptor_encode((uint64_t)16) << 16;
-	desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
-	desc |= 1llu << 62; // 128B swizzle
-	return desc;
+  // Convert pointer to SMEM address
+  uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(base_ptr));
+  uint64_t desc = 0ULL;
+
+  // Encode base address bits
+  desc |= matrix_descriptor_encode(addr);
+
+  // Encode leading dimensions (ld_major, ld_minor)
+  desc |= (matrix_descriptor_encode((uint64_t)ld_major) << 16);  // leading dimentin byte offset
+  desc |= (matrix_descriptor_encode((uint64_t)ld_minor) << 32);  // stide dimension byte offset
+
+  // Turn off the 128B swizzle => do *not* set bit 62
+  // desc |= (1ULL << 62);  // <--- commented out for no swizzling
+
+  return desc;
 }
 
-__device__ void warpgroup_arrive() {
-    asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
+// ---------------------------------------------------------------------
+// WGMMA fence/commit/wait
+// ---------------------------------------------------------------------
+__device__ __forceinline__ void wgmma_fence() {
+  asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
 }
 
-__device__ void warpgroup_commit_batch() {
-    asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
+__device__ __forceinline__ void wgmma_commit_group() {
+  asm volatile("wgmma.commit_group.sync.aligned;\n" ::: "memory");
 }
 
-template <int N>
-__device__ void warpgroup_wait() {
-    static_assert(N >= 0 && N <= 7, "WGMMA wait: N must be in range [0, 7]");
-    asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(N) : "memory");
+template<int N>
+__device__ __forceinline__ void wgmma_wait_group() {
+  static_assert(N >= 0 && N <= 7, "wgmma_wait_group: N must be in [0..7]");
+  asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(N) : "memory");
 }
+
+
 
 
 template <typename Tin, int BlockMajorSize, int BlockMinorSize>
@@ -183,114 +199,6 @@ __device__ void wgmma64(float d[4][8], uint8_t *sA, uint8_t *sB) {
 }
 
 
-
-//----------------------------------------------------------------------------//
-// GPU kernel 
-//----------------------------------------------------------------------------//
-template <int BM, int BN, int BK, int WGMMA_M, int WGMMA_N, int WGMMA_K, int NUM_THREADS>
-__global__ void __launch_bounds__(NUM_THREADS) kernel_wgmma_fp8_e5m2(int M, int N, int K,
-																	 uint32_t *D,
-																	 const CUtensorMap *tensorMapA, const CUtensorMap *tensorMapB)
-{
-
-    __shared__ alignas(128) uint8_t sA[BM*BK]; // 64x8 
-    __shared__ alignas(128) uint8_t sB[BK*BN]; // 32x8
-
-	//  wgmma_n = 8
-    // float d[WGMMA_N/16][8];
-    float d[WGMMA_N/8][2];
-
-    // static_assert(sizeof(d) * 128 == BM * BN * sizeof(float));  ? why this?
-
-    memset(d, 0, sizeof(d));
-
-    const int num_blocks_k = K / BK;
-    int num_block_n = blockIdx.x % (N / BN);
-    int num_block_m = blockIdx.x / (N / BN);
-
-    #pragma nv_diag_suppress static_var_with_dynamic_init
-
-    __shared__ barrier barA;
-    __shared__ barrier barB;
-
-    if (threadIdx.x == 0) {
-        init(&barA, blockDim.x);
-        init(&barB, blockDim.x);
-        cde::fence_proxy_async_shared_cta();
-    }
-    __syncthreads();
-
-    barrier::arrival_token tokenA, tokenB;
-
-	// 32/32 = 1 iter
-    for (int block_k_iter = 0; block_k_iter < num_blocks_k; ++block_k_iter) {
-        // Load
-        if (threadIdx.x == 0) {
-
-			// row offset , column offset
-			// MxK
-            cde::cp_async_bulk_tensor_2d_global_to_shared(&sA[0], tensorMapA, block_k_iter*BK, num_block_m*BM, barA);
-            tokenA = cuda::device::barrier_arrive_tx(barA, 1, sizeof(sA));
-
-			// NxK
-            cde::cp_async_bulk_tensor_2d_global_to_shared(&sB[0], tensorMapB, block_k_iter*BK, num_block_n*BN, barB);
-            tokenB = cuda::device::barrier_arrive_tx(barB, 1, sizeof(sB));
-
-        } else {
-            tokenA = barA.arrive();
-            tokenB = barB.arrive();
-        }
-        barA.wait(std::move(tokenA));
-        barB.wait(std::move(tokenB));
-        __syncthreads();
-    
-        // Compute
-        warpgroup_arrive();
-
-		//print?
-
-
-        // wgmma64<1, 1, 1, 0, 0>(d, &sA[0], &sB[0]);
-        // wgmma64<1, 1, 1, 0, 0>(d, &sA[WGMMA_K], &sB[WGMMA_K]);
-        // wgmma64<1, 1, 1, 0, 0>(d, &sA[2*WGMMA_K], &sB[2*WGMMA_K]);
-        // wgmma64<1, 1, 1, 0, 0>(d, &sA[3*WGMMA_K], &sB[3*WGMMA_K]);
-        // warpgroup_commit_batch();
-        // warpgroup_wait<0>();
-    }
-
-/*
-    // Store
-    {
-        int tid = threadIdx.x;
-        int lane = tid % 32;
-        int warp = tid / 32;
-        uint32_t row = warp*16 + lane / 4;
-        bf16 *block_C = C + num_block_n*BN*M + num_block_m*BM;
-
-        for (int m_it = 0; m_it < BM/WGMMA_M; ++m_it) {
-            for (int n_it = 0; n_it < BN/WGMMA_N; ++n_it) {
-                for (int w = 0; w < WGMMA_N/16; ++w) {
-                    int col = 16*w + 2*(tid % 4);
-                    #define IDX(i, j) ((j + n_it*WGMMA_N)*M + ((i) + m_it*WGMMA_M))
-
-                    block_C[IDX(row, col)] = d[w][0];
-                    block_C[IDX(row, col+1)] = d[w][1];
-                    block_C[IDX(row+8, col)] = d[w][2];
-                    block_C[IDX(row+8, col+1)] = d[w][3];
-    
-                    block_C[IDX(row, col+8)] = d[w][4];
-                    block_C[IDX(row, col+9)] = d[w][5];
-                    block_C[IDX(row+8, col+8)] = d[w][6];
-                    block_C[IDX(row+8, col+9)] = d[w][7];
-
-                    #undef IDX
-                }
-            }
-        }
-    }
-	*/
-}
-
 // ---------------------------------------------------------------------
 // Kernel:	single block of 128 threads. We do a single 64x8x32 MMA
 // 			from FP8 E5M2 => accum in FP16, stored in two 32-bit regs.
@@ -318,17 +226,17 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	}
 	__syncthreads();
 
-	// // Build SMEM descriptors for A/B. No swizzle.
-	// // For a 64x32 chunk: each row is 32 columns => ld_major=32, arbitrary ld_minor=1024
-	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/1024);
+	// Build SMEM descriptors for A/B. No swizzle.
+	// For a 64x32 chunk: each row is 32 columns => ld_major=32, arbitrary ld_minor=1024
+	uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/1024);
 
-	// // For a 32x8 chunk: each row is 8 columns => ld_major=8, arbitrary ld_minor=512
-	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/512);
+	// For a 32x8 chunk: each row is 8 columns => ld_major=8, arbitrary ld_minor=512
+	uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/512);
 
-	// // Our accumulators: 2 x 32-bit registers => 4 total fp16 values
-	// uint32_t c0 = 0u, c1 = 0u;
+	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
+	uint32_t c0 = 0u, c1 = 0u;
 
-	// // Start the WGMMA group
+	// Start the WGMMA group
 	// wgmma_fence();
 
 	// // One wgmma call for the entire 64x8x32
