@@ -300,23 +300,23 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	const uint8_t *B, // [32*8 ] = 256  bytes
 	uint32_t *C)	
 {
-	// // We'll copy entire A and B into SMEM. (No TMA, no advanced cp.async.)
-	// __shared__ fp8_e5m2_t sA[64 * 32]; // 2048 bytes
-	// __shared__ fp8_e5m2_t sB[32 * 8];  // 256 bytes
+	// We'll copy entire A and B into SMEM. (No TMA, no advanced cp.async.)
+	__shared__ uint8_t sA[64 * 32]; // 2048 bytes
+	__shared__ uint8_t sB[32 * 8];  // 256 bytes
 
-	// // We'll do naive copy from global to shared:
-	// int tid = threadIdx.x;
-	// // Copy A (2048 elements)
-	// for (int i = tid; i < 64 * 32; i += blockDim.x)
-	// {
-	// 	sA[i] = A[i];
-	// }
-	// // Copy B (256 elements)
-	// for (int i = tid; i < 32 * 8; i += blockDim.x)
-	// {
-	// 	sB[i] = B[i];
-	// }
-	// __syncthreads();
+	// We'll do naive copy from global to shared:
+	int tid = threadIdx.x;
+	// Copy A (2048 elements)
+	for (int i = tid; i < 64 * 32; i += blockDim.x)
+	{
+		sA[i] = A[i];
+	}
+	// Copy B (256 elements)
+	for (int i = tid; i < 32 * 8; i += blockDim.x)
+	{
+		sB[i] = B[i];
+	}
+	__syncthreads();
 
 	// // Build SMEM descriptors for A/B. No swizzle.
 	// // For a 64x32 chunk: each row is 32 columns => ld_major=32, arbitrary ld_minor=1024
@@ -430,31 +430,32 @@ int main(int argc, char **argv)
     //------------------------------------------------------------------------//
     // Run all test cases
     //------------------------------------------------------------------------//
-    std::cout << "\nRun Tensor Core Tests" << std::endl;
+    std::cout << "\nRun Tensor Core Tests\n" << std::endl;
 
     // prepare results
     int totalNum = static_cast<int>(allTests_ab.size());
 
 	// results in 32 results?
-    std::vector<std::vector<uint32_t>> allTests_results(totalNum); 
+    std::vector<std::vector<uint32_t>> allTests_results(totalNum);
 
-    for (int i = 0; i < totalNum; i++)
-    {
-      // each test inputs
-      uint16_t current_test_c = allTests_c[i];
-      std::vector<uint8_t> current_test_ab = allTests_ab[i];
+	for (int i = 0; i < totalNum; i++)
+	{
+		logMessage("case : %d\n", i);
 
-      // output
-      std::vector<uint32_t> current_result;
+		// each test inputs
+		uint16_t current_test_c = allTests_c[i];
+		std::vector<uint8_t> current_test_ab = allTests_ab[i];
 
-      //--------------------------------------------------------------------//
-      // run tensor core test
-      //--------------------------------------------------------------------//
-      runTest<K32>(current_test_ab, current_test_c, current_result);
+		// output
+		std::vector<uint32_t> current_result;
 
-      allTests_results[i] = current_result;
+		//--------------------------------------------------------------------//
+		// run tensor core test
+		//--------------------------------------------------------------------//
+		runTest<K32>(current_test_ab, current_test_c, current_result);
 
-    }
+		allTests_results[i] = current_result;
+	}
 
 /*
       for (int kernel_num : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
