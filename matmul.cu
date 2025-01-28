@@ -244,7 +244,7 @@ __global__ void __launch_bounds__(NUM_THREADS) kernel_wgmma_fp8_e5m2(int M, int 
         barB.wait(std::move(tokenB));
         __syncthreads();
     
-        Compute
+        // Compute
         warpgroup_arrive();
 
 		//print?
