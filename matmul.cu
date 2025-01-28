@@ -1,11 +1,3 @@
-#include <cuda.h>
-#include <cudaTypedefs.h>
-#include <cuda/barrier>
-#include <cublas_v2.h>
-#include <cuda_runtime.h>
-#include <cuda_bf16.h>
-
-
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -18,16 +10,50 @@
 #include <vector>
 #include <random>
 #include <cassert>
-#include <unistd.h>
 
 #include <iomanip>  // setfill, setw
 #include <cstdint>  // int8_t/uint8_t
+#include <cstdarg>
+#include <cstdio>
+
+
+
+#include <cuda.h>
+#include <cudaTypedefs.h>
+#include <cuda/barrier>
+#include <cublas_v2.h>
+#include <cuda_runtime.h>
+// #include <cuda_bf16.h>
 
 #define DEBUG 1
 #define K32 32 
-
-
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
+
+// typedef __nv_bfloat16 bf16;
+
+
+//----------------------------------------------------------------------------//
+// Utility 
+//----------------------------------------------------------------------------//
+void logMessage(const char* format, ...) {
+    // Get the current timestamp
+    std::time_t now = std::time(nullptr);
+    char timestamp[20];
+    std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+
+    // Print the timestamp
+    std::cout << "[" << timestamp << "] ";
+
+    // Handle the variadic arguments
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);  // Print the formatted message
+    va_end(args);
+
+    // End with a newline
+    std::cout << std::endl;
+}
+
 
 void cudaCheck(cudaError_t error, const char *file, int line) {
   if (error != cudaSuccess) {
@@ -37,35 +63,40 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
   }
 }
 
-// typedef __nv_bfloat16 bf16;
 #define cudaCheck(err) (cudaCheck(err, __FILE__, __LINE__))
 
+//----------------------------------------------------------------------------//
+// Functions 
+//----------------------------------------------------------------------------//
 template <int TILE_K>
 void runTest(std::vector<uint8_t> current_test_ab,
              uint32_t current_test_c,
              std::vector<uint32_t> &current_result);
 
-//----------------------------------------------------------------------------//
-// wgmma related apis 
-//----------------------------------------------------------------------------//
 
-// wgmma example in bf16
-// #include "examples/matmul/matmul_2.cuh"
 
+
+
+//----------------------------------------------------------------------------//
+// wgmma used in "examples/matmul/matmul_2.cuh"   (bf16)
+//----------------------------------------------------------------------------//
 using barrier = cuda::barrier<cuda::thread_scope_block>;
 namespace cde = cuda::device::experimental;
 
+// why this desc encode?
 __device__ static inline uint64_t matrix_descriptor_encode(uint64_t x) { return (((x) & 0x3FFFF) >> 0x4); }
 
-// __device__ uint64_t make_smem_desc(bf16* ptr) {
-//     uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
-//     uint64_t desc = 0x0000000000000000;
-//     desc |= matrix_descriptor_encode(addr);
-//     desc |= matrix_descriptor_encode((uint64_t)16) << 16;
-//     desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
-//     desc |= 1llu << 62; // 128B swizzle
-//     return desc;
-//   }
+// I think I need to change the connent given fp8 input, rather than direclty using bf16
+__device__ uint64_t make_smem_desc(uint8_t *ptr)
+{
+	uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(ptr));
+	uint64_t desc = 0x0000000000000000;
+	desc |= matrix_descriptor_encode(addr);
+	desc |= matrix_descriptor_encode((uint64_t)16) << 16;
+	desc |= matrix_descriptor_encode((uint64_t)1024) << 32;
+	desc |= 1llu << 62; // 128B swizzle
+	return desc;
+}
 
 __device__ void warpgroup_arrive() {
     asm volatile("wgmma.fence.sync.aligned;\n" ::: "memory");
@@ -81,39 +112,488 @@ __device__ void warpgroup_wait() {
     asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(N) : "memory");
 }
 
-// template <int BlockMajorSize, int BlockMinorSize>
-// void create_tensor_map(CUtensorMap *tma_map, bf16* gmem_ptr, int blocks_height, int blocks_width) {
-//     void* gmem_address = (void*)gmem_ptr;
-//     uint64_t gmem_prob_shape[5] = {(uint64_t)BlockMinorSize*blocks_width, (uint64_t)BlockMajorSize*blocks_height, 1, 1, 1};
-//     uint64_t gmem_prob_stride[5] = {sizeof(bf16), sizeof(bf16) * BlockMinorSize*blocks_width, 0, 0, 0};
-//     uint32_t smem_box_shape[5] = {uint32_t(BlockMinorSize), uint32_t(BlockMajorSize), 1, 1, 1};
-//     uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
-//     CUresult result = cuTensorMapEncodeTiled(
-//         tma_map, CU_TENSOR_MAP_DATA_TYPE_BFLOAT16, 2, gmem_address, gmem_prob_shape,
-//         gmem_prob_stride + 1, smem_box_shape, smem_box_stride, CU_TENSOR_MAP_INTERLEAVE_NONE,
-//         CU_TENSOR_MAP_SWIZZLE_128B, CU_TENSOR_MAP_L2_PROMOTION_NONE, CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+template <typename Tin, int BlockMajorSize, int BlockMinorSize>
+void create_tensor_map(CUtensorMap *tma_map, Tin* gmem_ptr, int blocks_height, int blocks_width) {
+    void* gmem_address = (void*)gmem_ptr;
+    uint64_t gmem_prob_shape[5] = {(uint64_t)BlockMinorSize*blocks_width, (uint64_t)BlockMajorSize*blocks_height, 1, 1, 1};
+    uint64_t gmem_prob_stride[5] = {sizeof(Tin), sizeof(Tin) * BlockMinorSize*blocks_width, 0, 0, 0};
 
-//     assert(result == CUDA_SUCCESS);
+    uint32_t smem_box_shape[5] = {uint32_t(BlockMinorSize), uint32_t(BlockMajorSize), 1, 1, 1};
+    uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
+
+    CUresult result = cuTensorMapEncodeTiled(
+        tma_map,
+		// CU_TENSOR_MAP_DATA_TYPE_BFLOAT16,
+		CU_TENSOR_MAP_DATA_TYPE_UINT8,
+		2, gmem_address, gmem_prob_shape,
+        gmem_prob_stride + 1, smem_box_shape, smem_box_stride,
+		CU_TENSOR_MAP_INTERLEAVE_NONE,
+        // CU_TENSOR_MAP_SWIZZLE_128B,
+		CU_TENSOR_MAP_SWIZZLE_NONE,
+		CU_TENSOR_MAP_L2_PROMOTION_NONE,
+		CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+
+    assert(result == CUDA_SUCCESS);
+}
+
+
+
+template <typename Tin ,int BlockMajorSize, int BlockMinorSize>
+__host__ static inline CUtensorMap* allocate_and_create_tensor_map(Tin* src, int blocks_height, int blocks_width) {
+	logMessage("%s", __func__);
+	logMessage("blocks height = %d", blocks_height);
+	logMessage("blocks width  = %d", blocks_width);
+	
+    CUtensorMap *tma_map_d;
+    cudaMalloc(&tma_map_d, sizeof(CUtensorMap));
+    CUtensorMap tma_map_src;
+    create_tensor_map<Tin, BlockMajorSize, BlockMinorSize>(&tma_map_src, src, blocks_height, blocks_width);
+    cudaMemcpy(tma_map_d, &tma_map_src, sizeof(CUtensorMap), cudaMemcpyHostToDevice);  //  ?  d2d?
+    return tma_map_d;
+}
+
+//----------------------------------------------------------------------------//
+//
+//----------------------------------------------------------------------------//
+
+// template<int ScaleD, int ScaleA, int ScaleB, int TransA, int TransB>
+// __device__ void wgmma64(float d[4][8], bf16* sA, bf16* sB) {
+//     uint64_t desc_a = make_smem_desc(&sA[0]);
+//     uint64_t desc_b = make_smem_desc(&sB[0]);
+//     asm volatile(
+//         "{\n"
+//         "wgmma.mma_async.sync.aligned.m64n64k16.f32.bf16.bf16 "
+//         "{%0,   %1,   %2,   %3,   %4,   %5,   %6,   %7,   "
+//         " %8,   %9,   %10,  %11,  %12,  %13,  %14,  %15,  "
+//         " %16,  %17,  %18,  %19,  %20,  %21,  %22,  %23,  "
+//         " %24,  %25,  %26,  %27,  %28,  %29,  %30,  %31},"
+//         " %32,"
+//         " %33,"
+//         " %34, %35, %36, %37, %38;\n"
+//         "}\n"
+//         : "+f"(d[0][0]), "+f"(d[0][1]), "+f"(d[0][2]), "+f"(d[0][3]), "+f"(d[0][4]), "+f"(d[0][5]),
+//           "+f"(d[0][6]), "+f"(d[0][7]), "+f"(d[1][0]), "+f"(d[1][1]), "+f"(d[1][2]), "+f"(d[1][3]),
+//           "+f"(d[1][4]), "+f"(d[1][5]), "+f"(d[1][6]), "+f"(d[1][7]), "+f"(d[2][0]), "+f"(d[2][1]),
+//           "+f"(d[2][2]), "+f"(d[2][3]), "+f"(d[2][4]), "+f"(d[2][5]), "+f"(d[2][6]), "+f"(d[2][7]),
+//           "+f"(d[3][0]), "+f"(d[3][1]), "+f"(d[3][2]), "+f"(d[3][3]), "+f"(d[3][4]), "+f"(d[3][5]),
+//           "+f"(d[3][6]), "+f"(d[3][7])
+//         : "l"(desc_a), "l"(desc_b), "n"(int32_t(ScaleD)), "n"(int32_t(ScaleA)),
+//           "n"(int32_t(ScaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 // }
 
 
 
-// template <int BlockMajorSize, int BlockMinorSize>
-// __host__ static inline CUtensorMap* allocate_and_create_tensor_map(bf16* src, int blocks_height, int blocks_width) {
-//     CUtensorMap *tma_map_d;
-//     cudaMalloc(&tma_map_d, sizeof(CUtensorMap));
-//     CUtensorMap tma_map_host;
-//     create_tensor_map<BlockMajorSize, BlockMinorSize>(&tma_map_host, src, blocks_height, blocks_width);
-//     cudaMemcpy(tma_map_d, &tma_map_host, sizeof(CUtensorMap), cudaMemcpyHostToDevice);
-//     return tma_map_d;
-// }
+//----------------------------------------------------------------------------//
+// GPU kernel 
+//----------------------------------------------------------------------------//
+template <int BM, int BN, int BK, int WGMMA_M, int WGMMA_N, int WGMMA_K, int NUM_THREADS>
+__global__ void __launch_bounds__(NUM_THREADS) kernel_wgmma_fp8_e5m2(int M, int N, int K,
+																	 uint32_t *C, uint32_t *D,
+																	 const CUtensorMap *tensorMapA, const CUtensorMap *tensorMapB)
+{
+
+    __shared__ alignas(128) uint8_t sA[BM*BK]; // 64x8 
+    __shared__ alignas(128) uint8_t sB[BK*BN]; // 32x8
+
+	//  wgmma_n = 8
+    // float d[WGMMA_N/16][8];
+    float d[WGMMA_N/8][2];
+
+    // static_assert(sizeof(d) * 128 == BM * BN * sizeof(float));  ? why this?
+
+    memset(d, 0, sizeof(d));
+
+    const int num_blocks_k = K / BK;
+    int num_block_n = blockIdx.x % (N / BN);
+    int num_block_m = blockIdx.x / (N / BN);
+
+    #pragma nv_diag_suppress static_var_with_dynamic_init
+
+    __shared__ barrier barA;
+    __shared__ barrier barB;
+
+    if (threadIdx.x == 0) {
+        init(&barA, blockDim.x);
+        init(&barB, blockDim.x);
+        cde::fence_proxy_async_shared_cta();
+    }
+    __syncthreads();
+
+    barrier::arrival_token tokenA, tokenB;
+
+	// 32/32 = 1 iter
+    for (int block_k_iter = 0; block_k_iter < num_blocks_k; ++block_k_iter) {
+        // Load
+        if (threadIdx.x == 0) {
+
+			// row offset , column offset
+			// MxK
+            cde::cp_async_bulk_tensor_2d_global_to_shared(&sA[0], tensorMapA, block_k_iter*BK, num_block_m*BM, barA);
+            tokenA = cuda::device::barrier_arrive_tx(barA, 1, sizeof(sA));
+
+			// NxK
+            cde::cp_async_bulk_tensor_2d_global_to_shared(&sB[0], tensorMapB, block_k_iter*BK, num_block_n*BN, barB);
+            tokenB = cuda::device::barrier_arrive_tx(barB, 1, sizeof(sB));
+
+        } else {
+            tokenA = barA.arrive();
+            tokenB = barB.arrive();
+        }
+        barA.wait(std::move(tokenA));
+        barB.wait(std::move(tokenB));
+        __syncthreads();
+    
+        // // Compute
+        // warpgroup_arrive();
+        // wgmma64<1, 1, 1, 0, 0>(d, &sA[0], &sB[0]);
+        // wgmma64<1, 1, 1, 0, 0>(d, &sA[WGMMA_K], &sB[WGMMA_K]);
+        // wgmma64<1, 1, 1, 0, 0>(d, &sA[2*WGMMA_K], &sB[2*WGMMA_K]);
+        // wgmma64<1, 1, 1, 0, 0>(d, &sA[3*WGMMA_K], &sB[3*WGMMA_K]);
+        // warpgroup_commit_batch();
+        // warpgroup_wait<0>();
+    }
+
+/*
+    // Store
+    {
+        int tid = threadIdx.x;
+        int lane = tid % 32;
+        int warp = tid / 32;
+        uint32_t row = warp*16 + lane / 4;
+        bf16 *block_C = C + num_block_n*BN*M + num_block_m*BM;
+
+        for (int m_it = 0; m_it < BM/WGMMA_M; ++m_it) {
+            for (int n_it = 0; n_it < BN/WGMMA_N; ++n_it) {
+                for (int w = 0; w < WGMMA_N/16; ++w) {
+                    int col = 16*w + 2*(tid % 4);
+                    #define IDX(i, j) ((j + n_it*WGMMA_N)*M + ((i) + m_it*WGMMA_M))
+
+                    block_C[IDX(row, col)] = d[w][0];
+                    block_C[IDX(row, col+1)] = d[w][1];
+                    block_C[IDX(row+8, col)] = d[w][2];
+                    block_C[IDX(row+8, col+1)] = d[w][3];
+    
+                    block_C[IDX(row, col+8)] = d[w][4];
+                    block_C[IDX(row, col+9)] = d[w][5];
+                    block_C[IDX(row+8, col+8)] = d[w][6];
+                    block_C[IDX(row+8, col+9)] = d[w][7];
+
+                    #undef IDX
+                }
+            }
+        }
+    }
+	*/
+}
+
+
 
 //----------------------------------------------------------------------------//
-// gpu tests and kernels
+// Main 
 //----------------------------------------------------------------------------//
+int main(int argc, char **argv)
+{
+  //------------------------------------------------------------------------//
+  // Read commandlines
+  //------------------------------------------------------------------------//
+  if (argc != 2)
+  {
+    std::cerr << "\nUsage: " << argv[0] << " <filename>" << std::endl;
+    return 1;
+  }
 
+  //------------------------------------------------------------------------//
+  // Read all test cases
+  //------------------------------------------------------------------------//
+	// 65 input values per row:   c +  32 of a/b
+  std::vector<uint32_t> allTests_c;              // input c
+  std::vector<std::vector<uint8_t>> allTests_ab; // input a/b
 
+  std::cout << "file : " << argv[1] << std::endl;
+
+  std::ifstream file(argv[1], std::ifstream::ate | std::ifstream::binary);
+  if (!file.is_open())
+  {
+    std::cerr << "Unable to open file " << argv[1] << std::endl;
+    return 1;
+    }
+
+    // Get the size of the file
+    std::streamsize fileSize = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::cout << "Read all the tests cases ... " << std::endl;
+    std::string line;
+    while (getline(file, line))
+    {
+        // read line :    c a0 b0 a1 b1 ....  aN bN
+        std::istringstream iss(line);
+        std::vector<uint8_t> numbers_ab;  // current line for a/b
+        std::string hexStr;
+
+        // read c first
+        iss >> hexStr;
+        uint32_t num_c = static_cast<uint32_t>(std::stoul(hexStr, nullptr, 16));
+        allTests_c.push_back(num_c);  // store current line for C
+
+        // read a/b
+        while (iss >> hexStr)
+        {
+            uint8_t num = static_cast<uint8_t>(std::stoul(hexStr, nullptr, 16));
+            numbers_ab.push_back(num);
+        }
+
+        allTests_ab.push_back(numbers_ab); // store current line for a and b 
+    }
+
+    std::cout << std::endl;
+
+    file.close();
+
+    //------------------------------------------------------------------------//
+    // Check first line : c + 32x{a(i), b(i)}
+    //------------------------------------------------------------------------//
+#if DEBUG
+    printf("\nCheck first line of input file:\n");
+    printf("%08X ", allTests_c[0]);
+    for (int i = 0; i < 64; i++)
+    {
+        printf("%02X ", allTests_ab[0][i]);
+    }
+    printf("\n\n");
+#endif
+
+    //------------------------------------------------------------------------//
+    // Run all test cases
+    //------------------------------------------------------------------------//
+    std::cout << "\nRun Tensor Core Tests" << std::endl;
+
+    // prepare results
+    int totalNum = static_cast<int>(allTests_ab.size());
+    std::vector<std::vector<uint32_t>> allTests_results(totalNum);
+
+    for (int i = 0; i < totalNum; i++)
+    {
+      // each test inputs
+      uint32_t current_test_c = allTests_c[i];
+      std::vector<uint8_t> current_test_ab = allTests_ab[i];
+
+      // output
+      std::vector<uint32_t> current_result;
+
+      //--------------------------------------------------------------------//
+      // run tensor core test
+      //--------------------------------------------------------------------//
+      runTest<K32>(current_test_ab, current_test_c, current_result);
+
+#if DEBUG
+      // printf("%08X %08X\n", current_result[0], current_result[1]);
+#endif
+      allTests_results[i] = current_result;
+
+    }
+
+/*
+      for (int kernel_num : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
+        // for (int kernel_num : {0, 11}) {
+        // Give the GPU some rest to avoid thermal throttling
+        sleep(5);
+        std::cout << "KERNEL " << kernel_num << std::endl;
+        // Verify against cuBLAS. Also serves as a warmup step.
+        if (run_verif) {
+          memset(C, 0, sizeof(bf16) * max_size * max_size);
+          cudaCheck(cudaMemcpy(dC, C, sizeof(bf16) * max_size * max_size, cudaMemcpyHostToDevice));
+          cudaCheck(cudaMemcpy(dC_ref, C, sizeof(bf16) * max_size * max_size, cudaMemcpyHostToDevice));
+          memset(DB, ~0, sizeof(int) * max_size * 128);
+          cudaCheck(cudaMemcpy(dDB, DB, sizeof(int) * max_size * 128,
+            cudaMemcpyHostToDevice));
+          run_kernel(0, m, n, k, dA, dB, dC_ref); // cuBLAS
+          run_kernel(kernel_num, m, n, k, dA, dB, dC, dDB); // Executes the kernel, modifies the result matrix
+          cudaCheck(cudaDeviceSynchronize());
+          cudaCheck(cudaGetLastError()); // Check for async errors during kernel run
+          cudaMemcpy(C, dC, sizeof(bf16) * max_size * max_size, cudaMemcpyDeviceToHost);
+          cudaMemcpy(C_ref, dC_ref, sizeof(bf16) * max_size * max_size, cudaMemcpyDeviceToHost);
+
+          if (kernel_num > 1 && !verify_matrix(C_ref, C, m * n)) {
+            std::cout << "~~~~~~~~~~~~~~~~ Failed to pass the correctness verification against cuBLAS. ~~~~~~~~~~~~~~~~" << std::endl;
+            printf("%f\n", __bfloat162float(C_ref[m]));
+          }
+
+          cudaMemcpy(DB, dDB, sizeof(int) * max_size * 8, cudaMemcpyDeviceToHost);
+
+      */
+    return 0;
+};
+
+//----------------------------------------------------------------------------//
+// host code to prepare test
+//----------------------------------------------------------------------------//
+template <int TILE_K>
+void runTest(std::vector<uint8_t> current_test_ab,
+			 uint32_t current_test_c,
+			 std::vector<uint32_t> &current_result)
+{
+	//------------------------------------------------------------------------//
+	// total workload size M 64 x N 8 x K 32
+	//------------------------------------------------------------------------//
+	long max_size = 64;
+	long M = 64, N = 8, K = 32;
+
+	//------------------------------------------------------------------------//
+	// prepare host buffers
+	//------------------------------------------------------------------------//
+	uint8_t *hA = nullptr;
+	uint8_t *hB = nullptr;
+
+	uint32_t *hC = nullptr;
+	uint32_t *hD = nullptr;
+
+	size_t sizeA = M * K;
+	size_t sizeB = N * K;
+	size_t sizeCD = M * N;
+
+	hA = (uint8_t *)malloc(sizeof(uint8_t) * sizeA);
+	hB = (uint8_t *)malloc(sizeof(uint8_t) * sizeB);
+
+	hC = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
+	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
+
+	// init to 0
+	memset(hA, 0, sizeof(uint8_t) * sizeA);
+	memset(hB, 0, sizeof(uint8_t) * sizeB);
+
+	memset(hC, 0, sizeof(uint32_t) * sizeCD);
+	memset(hD, 0, sizeof(uint32_t) * sizeCD);
+
+	//------------------------------------------------------------------------//
+	// read/set up data on cpu
+	//------------------------------------------------------------------------//
+	std::cout << "Read inputs a/b " << std::endl;
+	for (int i = 0; i < TILE_K; i++)
+	{
+		hA[i] = current_test_ab[i * 2];		//  read a
+		hB[i] = current_test_ab[i * 2 + 1]; //  read b
+	}
+
+	std::cout << "Read input C" << std::endl;
+	hC[0] = current_test_c;
+
+	// // cpu buffer: two results in fp32
+	// // 1st : dotproduct of (a, b)
+	// // 2nd : dotproduct of (a, b) + C
+	// uint32_t *result_cpu = 0;
+	// result_cpu = (uint32_t *)malloc(sizeof(uint32_t) * 2);
+
+	//------------------------------------------------------------------------//
+	// gpu buffer
+	//------------------------------------------------------------------------//
+	uint8_t *dA = nullptr;
+	uint8_t *dB = nullptr;
+	uint32_t *dC = nullptr;
+	uint32_t *dD = nullptr;
+
+	cudaMalloc((void **)&dA, sizeof(uint8_t) * sizeA);
+	cudaMalloc((void **)&dB, sizeof(uint8_t) * sizeB);
+
+	cudaMalloc((void **)&dC, sizeof(uint32_t) * sizeCD);
+	cudaMalloc((void **)&dD, sizeof(uint32_t) * sizeCD);
+
+	// float *buf_fp32 = 0;
+	// half *buf_fp16 = 0;
+	// cudaMalloc((void **)&buf_fp32, sizeof(float) * 1024);
+	// cudaMalloc((void **)&buf_fp16, sizeof(half) * 1024);
+
+	// // output buffer
+	// cudaMalloc((void **)&result_gpu, sizeof(uint32_t) * 2);
+
+	// h2d : copy input ops to gpu
+	cudaMemcpy(dA, hA, sizeof(uint8_t) * sizeA, cudaMemcpyHostToDevice);
+	cudaMemcpy(dB, hB, sizeof(uint8_t) * sizeB, cudaMemcpyHostToDevice);
+
+	cudaMemcpy(dC, hC, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
+	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
+
+	// launch 1 block
+	constexpr int BM = 64;
+	constexpr int BN = 8;
+	constexpr int BK = 32;
+	constexpr int NUM_THREADS = 128;
+
+	CUtensorMap *d_tma_map_A = 0;
+	CUtensorMap *d_tma_map_B = 0;
+
+	d_tma_map_A = allocate_and_create_tensor_map<uint8_t, BM, BK>(dA, M / BM, K / BK);
+	d_tma_map_B = allocate_and_create_tensor_map<uint8_t, BN, BK>(dB, N / BN, K / BK);
+
+	// reuse matmul kernel 2
+	kernel_wgmma_fp8_e5m2<
+		BM,
+		BN,
+		BK,
+		/*WGMMA_M*/ 64,
+		/*WGMMA_N*/ 8,
+		/*WGMMA_K*/ 32,
+		/*NUM_THREADS*/ NUM_THREADS>
+		<<<(M / BM) * (N / BN), NUM_THREADS>>>(M, N, K, dC, dD, d_tma_map_A, d_tma_map_B);
+
+	//------------------------------------------------------------------------//
+	// 1 warpgroup = 128 threads
+	//------------------------------------------------------------------------//
+	//   kernel_wgmma_FP8<<<1, 128>>>(buf_fp32, buf_fp16, test_inputs_ab, test_inputs_c, result_gpu);
+
+	/*
+	  // d2h : copy results back to host
+	  cudaMemcpy(result_cpu, result_gpu, sizeof(uint32_t) * 2, cudaMemcpyDeviceToHost);
+
+	  // check value
+	#if DEBUG
+	  printf("%08X %08X\n", result_cpu[0], result_cpu[1]);
+	#endif
+
+	  current_result.push_back(result_cpu[0]);
+	  current_result.push_back(result_cpu[1]);
+
+	  if (buf_fp32)
+	  {
+		cudaFree(buf_fp32);
+	  }
+
+	  if (buf_fp16)
+	  {
+		cudaFree(buf_fp16);
+	  }
+
+	  if (test_inputs_ab)
+	  {
+		cudaFree(test_inputs_ab);
+	  }
+
+	  if (test_inputs_c)
+	  {
+		cudaFree(&test_inputs_c);
+	  }
+
+	  if (result_gpu)
+	  {
+		cudaFree(result_gpu);
+	  }
+	  */
+
+	//   free(result_cpu);
+
+	cudaFree(dA);
+	cudaFree(dB);
+	cudaFree(dC);
+	cudaFree(dD);
+
+	free(hA);
+	free(hB);
+	free(hC);
+	free(hD);
+
+	cudaDeviceSynchronize();
+}
 
 /*
 __global__ void kernel_wgmma_FP8(float *buf_fp32, half *buf_fp16,
@@ -716,304 +1196,3 @@ __global__ void kernel_wgmma_FP8(float *buf_fp32, half *buf_fp16,
   memcpy(&buf_fp32[threadIdx.x * 4], C, 16); // 4 of 32 bits = 16 bytes = 4 fp32 values
 }
 */
-
-// __global__ void warmupKernel() {
-//   __shared__ int s[100];
-//   s[0] += s[1];
-// }
-
-
-
-// input file 
-// 65 input per row:   c +  32 of a/b
-int main(int argc, char **argv)
-{
-  //------------------------------------------------------------------------//
-  // Read commandlines
-  //------------------------------------------------------------------------//
-  if (argc != 2)
-  {
-    std::cerr << "\nUsage: " << argv[0] << " <filename>" << std::endl;
-    return 1;
-  }
-
-  //------------------------------------------------------------------------//
-  // Read all test cases
-  //------------------------------------------------------------------------//
-  std::vector<uint32_t> allTests_c;              // input c
-  std::vector<std::vector<uint8_t>> allTests_ab; // input a/b
-
-  std::cout << "file : " << argv[1] << std::endl;
-
-  std::ifstream file(argv[1], std::ifstream::ate | std::ifstream::binary);
-  if (!file.is_open())
-  {
-    std::cerr << "Unable to open file " << argv[1] << std::endl;
-    return 1;
-    }
-
-    // Get the size of the file
-    std::streamsize fileSize = file.tellg();
-    file.seekg(0, std::ios::beg);
-
-    std::cout << "Read all the tests cases ... " << std::endl;
-    std::string line;
-    while (getline(file, line))
-    {
-        // read line :    c a0 b0 a1 b1 ....  aN bN
-        std::istringstream iss(line);
-        std::vector<uint8_t> numbers_ab;  // current line for a/b
-        std::string hexStr;
-
-        // read c first
-        iss >> hexStr;
-        uint32_t num_c = static_cast<uint32_t>(std::stoul(hexStr, nullptr, 16));
-        allTests_c.push_back(num_c);  // store current line for C
-
-        // read a/b
-        while (iss >> hexStr)
-        {
-            uint8_t num = static_cast<uint8_t>(std::stoul(hexStr, nullptr, 16));
-            numbers_ab.push_back(num);
-        }
-
-        allTests_ab.push_back(numbers_ab); // store current line for a and b 
-    }
-
-    std::cout << std::endl;
-
-    file.close();
-
-    //------------------------------------------------------------------------//
-    // Check first line : c + 32x{a(i), b(i)}
-    //------------------------------------------------------------------------//
-#if DEBUG
-    printf("\nCheck first line of input file:\n");
-    printf("%08X ", allTests_c[0]);
-    for (int i = 0; i < 64; i++)
-    {
-        printf("%02X ", allTests_ab[0][i]);
-    }
-    printf("\n\n");
-#endif
-
-    //------------------------------------------------------------------------//
-    // Run all test cases
-    //------------------------------------------------------------------------//
-    std::cout << "\nRun Tensor Core Tests" << std::endl;
-
-    // prepare results
-    int totalNum = static_cast<int>(allTests_ab.size());
-    std::vector<std::vector<uint32_t>> allTests_results(totalNum);
-
-    for (int i = 0; i < totalNum; i++)
-    {
-      // each test inputs
-      uint32_t current_test_c = allTests_c[i];
-      std::vector<uint8_t> current_test_ab = allTests_ab[i];
-
-      // output
-      std::vector<uint32_t> current_result;
-
-      //--------------------------------------------------------------------//
-      // run tensor core test
-      //--------------------------------------------------------------------//
-      runTest<K32>(current_test_ab, current_test_c, current_result);
-
-#if DEBUG
-      // printf("%08X %08X\n", current_result[0], current_result[1]);
-#endif
-      allTests_results[i] = current_result;
-
-    }
-
-/*
-      for (int kernel_num : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
-        // for (int kernel_num : {0, 11}) {
-        // Give the GPU some rest to avoid thermal throttling
-        sleep(5);
-        std::cout << "KERNEL " << kernel_num << std::endl;
-        // Verify against cuBLAS. Also serves as a warmup step.
-        if (run_verif) {
-          memset(C, 0, sizeof(bf16) * max_size * max_size);
-          cudaCheck(cudaMemcpy(dC, C, sizeof(bf16) * max_size * max_size, cudaMemcpyHostToDevice));
-          cudaCheck(cudaMemcpy(dC_ref, C, sizeof(bf16) * max_size * max_size, cudaMemcpyHostToDevice));
-          memset(DB, ~0, sizeof(int) * max_size * 128);
-          cudaCheck(cudaMemcpy(dDB, DB, sizeof(int) * max_size * 128,
-            cudaMemcpyHostToDevice));
-          run_kernel(0, m, n, k, dA, dB, dC_ref); // cuBLAS
-          run_kernel(kernel_num, m, n, k, dA, dB, dC, dDB); // Executes the kernel, modifies the result matrix
-          cudaCheck(cudaDeviceSynchronize());
-          cudaCheck(cudaGetLastError()); // Check for async errors during kernel run
-          cudaMemcpy(C, dC, sizeof(bf16) * max_size * max_size, cudaMemcpyDeviceToHost);
-          cudaMemcpy(C_ref, dC_ref, sizeof(bf16) * max_size * max_size, cudaMemcpyDeviceToHost);
-
-          if (kernel_num > 1 && !verify_matrix(C_ref, C, m * n)) {
-            std::cout << "~~~~~~~~~~~~~~~~ Failed to pass the correctness verification against cuBLAS. ~~~~~~~~~~~~~~~~" << std::endl;
-            printf("%f\n", __bfloat162float(C_ref[m]));
-          }
-
-          cudaMemcpy(DB, dDB, sizeof(int) * max_size * 8, cudaMemcpyDeviceToHost);
-
-      */
-    return 0;
-};
-
-
-//----------------------------------------------------------------------------//
-// host code to prepare test
-//----------------------------------------------------------------------------//
-template <int TILE_K>
-void runTest(std::vector<uint8_t> current_test_ab,
-			 uint32_t current_test_c,
-			 std::vector<uint32_t> &current_result)
-{
-	//------------------------------------------------------------------------//
-	// total workload size M 64 x N 8 x K 32
-	//------------------------------------------------------------------------//
-	long max_size = 64;
-	long M = 64, N = 8, K = 32;
-
-	//------------------------------------------------------------------------//
-	// prepare host buffers
-	//------------------------------------------------------------------------//
-	uint8_t *hA = nullptr;
-	uint8_t *hB = nullptr;
-
-	uint32_t *hC = nullptr;
-	uint32_t *hD = nullptr;
-
-	size_t sizeA = M * K;
-	size_t sizeB = N * K;
-	size_t sizeCD = M * N;
-
-	hA = (uint8_t *)malloc(sizeof(uint8_t) * sizeA);
-	hB = (uint8_t *)malloc(sizeof(uint8_t) * sizeB);
-
-	hC = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
-	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
-
-	// init to 0
-	memset(hA, 0, sizeof(uint8_t) * sizeA);
-	memset(hB, 0, sizeof(uint8_t) * sizeB);
-
-	memset(hC, 0, sizeof(uint32_t) * sizeCD);
-	memset(hD, 0, sizeof(uint32_t) * sizeCD);
-
-	//------------------------------------------------------------------------//
-	// read/set up data on cpu
-	//------------------------------------------------------------------------//
-	std::cout << "Read inputs a/b " << std::endl;
-	for (int i = 0; i < TILE_K; i++)
-	{
-		hA[i] = current_test_ab[i * 2];		//  read a
-		hB[i] = current_test_ab[i * 2 + 1]; //  read b
-	}
-
-	std::cout << "Read input C" << std::endl;
-	hC[0] = current_test_c;
-
-	// // cpu buffer: two results in fp32
-	// // 1st : dotproduct of (a, b)
-	// // 2nd : dotproduct of (a, b) + C
-	// uint32_t *result_cpu = 0;
-	// result_cpu = (uint32_t *)malloc(sizeof(uint32_t) * 2);
-
-	//------------------------------------------------------------------------//
-	// gpu buffer
-	//------------------------------------------------------------------------//
-	uint8_t *dA = nullptr;
-	uint8_t *dB = nullptr;
-	uint32_t *dC = nullptr;
-	uint32_t *dD = nullptr;
-
-	cudaMalloc((void **)&dA, sizeof(uint8_t) * sizeA);
-	cudaMalloc((void **)&dB, sizeof(uint8_t) * sizeB);
-
-	cudaMalloc((void **)&dC, sizeof(uint32_t) * sizeCD);
-	cudaMalloc((void **)&dD, sizeof(uint32_t) * sizeCD);
-
-	// float *buf_fp32 = 0;
-	// half *buf_fp16 = 0;
-	// cudaMalloc((void **)&buf_fp32, sizeof(float) * 1024);
-	// cudaMalloc((void **)&buf_fp16, sizeof(half) * 1024);
-
-
-	// // output buffer
-	// cudaMalloc((void **)&result_gpu, sizeof(uint32_t) * 2);
-
-	// h2d : copy input ops to gpu
-	cudaMemcpy(dA, hA, sizeof(uint8_t) * sizeA, cudaMemcpyHostToDevice);
-	cudaMemcpy(dB, hB, sizeof(uint8_t) * sizeB, cudaMemcpyHostToDevice);
-
-	cudaMemcpy(dC, hC, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
-	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
-
-	constexpr int BM = 64;
-	constexpr int BN = 8;
-	constexpr int BK = 32;
-	constexpr int NUM_THREADS = 128;
-
-	CUtensorMap *d_tma_map_A = 0;
-	CUtensorMap *d_tma_map_B = 0;
-
-	//   d_tma_map_A = allocate_and_create_tensor_map<BM, BK>(dA, m / BM, k / BK);
-	//   d_tma_map_B = allocate_and_create_tensor_map<BN, BK>(dB, m / BN, k / BK);
-
-	//------------------------------------------------------------------------//
-	// 1 warpgroup = 128 threads
-	//------------------------------------------------------------------------//
-	//   kernel_wgmma_FP8<<<1, 128>>>(buf_fp32, buf_fp16, test_inputs_ab, test_inputs_c, result_gpu);
-
-	/*
-	  // d2h : copy results back to host
-	  cudaMemcpy(result_cpu, result_gpu, sizeof(uint32_t) * 2, cudaMemcpyDeviceToHost);
-
-	  // check value
-	#if DEBUG
-	  printf("%08X %08X\n", result_cpu[0], result_cpu[1]);
-	#endif
-
-	  current_result.push_back(result_cpu[0]);
-	  current_result.push_back(result_cpu[1]);
-
-	  if (buf_fp32)
-	  {
-		cudaFree(buf_fp32);
-	  }
-
-	  if (buf_fp16)
-	  {
-		cudaFree(buf_fp16);
-	  }
-
-	  if (test_inputs_ab)
-	  {
-		cudaFree(test_inputs_ab);
-	  }
-
-	  if (test_inputs_c)
-	  {
-		cudaFree(&test_inputs_c);
-	  }
-
-	  if (result_gpu)
-	  {
-		cudaFree(result_gpu);
-	  }
-	  */
-
-	//   free(result_cpu);
-
-	cudaFree(dA);
-	cudaFree(dB);
-	cudaFree(dC);
-	cudaFree(dD);
-
-	free(hA);
-	free(hB);
-	free(hC);
-	free(hD);
-
-	cudaDeviceSynchronize();
-}
