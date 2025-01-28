@@ -266,17 +266,17 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	C[2 * store_idx + 0] = c0;
 	C[2 * store_idx + 1] = c1;
 
-	// print the lower half of c0
-	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
-    uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
-    uint16_t c1_lo = static_cast<uint16_t>(c1 & 0xFFFF);
-    uint16_t c1_hi = static_cast<uint16_t>((c1 >> 16) & 0xFFFF);
+	// // print the lower half of c0
+	// uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
+    // uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+    // uint16_t c1_lo = static_cast<uint16_t>(c1 & 0xFFFF);
+    // uint16_t c1_hi = static_cast<uint16_t>((c1 >> 16) & 0xFFFF);
 
-	if(tid == 0) {
-		// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
-		// printf("[tid=%d] c0_lo=0x%04X \n", tid, c0_lo);
-		printf("[tid=%d] \n", tid);
-	}
+	// if(tid == 0) {
+	// 	// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
+	// 	// printf("[tid=%d] c0_lo=0x%04X \n", tid, c0_lo);
+	// 	printf("[tid=%d] \n", tid);
+	// }
 }
 
 //----------------------------------------------------------------------------//
@@ -496,79 +496,21 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	// Launch a single block with 128 threads => "1 warpgroup" in your test
     matmul_fp8e5m2_64x8x32_kernel<<<1, 128>>>(dA, dB, dD);
 
-	// // launch 1 block
-	// constexpr int BM = 64;
-	// constexpr int BN = 8;
-	// constexpr int BK = 32;
-	// constexpr int NUM_THREADS = 128;
+	// d2h : copy results back to host
+	cudaMemcpy(hD, dD, sizeof(uint32_t) * sizeCD, cudaMemcpyDeviceToHost);
 
-	// CUtensorMap *d_tma_map_A = 0;
-	// CUtensorMap *d_tma_map_B = 0;
+// check value
+#if DEBUG
+	uint32_t c0 = hD[0];
+	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
+	uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+	printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
+	printf("%08X\n", hD[0]);
+#endif
 
-	// d_tma_map_A = allocate_and_create_tensor_map<uint8_t, BM, BK>(dA, M / BM, K / BK);
-	// d_tma_map_B = allocate_and_create_tensor_map<uint8_t, BN, BK>(dB, N / BN, K / BK);
+	// current_result.push_back(result_cpu[0]);
+	// current_result.push_back(result_cpu[1]);
 
-
-
-	// // reuse matmul kernel 2
-	// kernel_wgmma_fp8_e5m2<
-	// 	BM,
-	// 	BN,
-	// 	BK,
-	// 	/*WGMMA_M*/ 64,
-	// 	/*WGMMA_N*/ 8,
-	// 	/*WGMMA_K*/ 32,
-	// 	/*NUM_THREADS*/ NUM_THREADS>
-	// 	<<<(M / BM) * (N / BN), NUM_THREADS>>>(M, N, K, dD, d_tma_map_A, d_tma_map_B);
-
-
-
-
-
-	//------------------------------------------------------------------------//
-	// 1 warpgroup = 128 threads
-	//------------------------------------------------------------------------//
-	//   kernel_wgmma_FP8<<<1, 128>>>(buf_fp32, buf_fp16, test_inputs_ab, test_inputs_c, result_gpu);
-
-	/*
-	  // d2h : copy results back to host
-	  cudaMemcpy(result_cpu, result_gpu, sizeof(uint32_t) * 2, cudaMemcpyDeviceToHost);
-
-	  // check value
-	#if DEBUG
-	  printf("%08X %08X\n", result_cpu[0], result_cpu[1]);
-	#endif
-
-	  current_result.push_back(result_cpu[0]);
-	  current_result.push_back(result_cpu[1]);
-
-	  if (buf_fp32)
-	  {
-		cudaFree(buf_fp32);
-	  }
-
-	  if (buf_fp16)
-	  {
-		cudaFree(buf_fp16);
-	  }
-
-	  if (test_inputs_ab)
-	  {
-		cudaFree(test_inputs_ab);
-	  }
-
-	  if (test_inputs_c)
-	  {
-		cudaFree(&test_inputs_c);
-	  }
-
-	  if (result_gpu)
-	  {
-		cudaFree(result_gpu);
-	  }
-	  */
-
-	//   free(result_cpu);
 
 	cudaFree(dA);
 	cudaFree(dB);
