@@ -298,69 +298,71 @@ __global__ void __launch_bounds__(NUM_THREADS) kernel_wgmma_fp8_e5m2(int M, int 
 //----------------------------------------------------------------------------//
 int main(int argc, char **argv)
 {
-  //------------------------------------------------------------------------//
-  // Read commandlines
-  //------------------------------------------------------------------------//
-  if (argc != 2)
-  {
-    std::cerr << "\nUsage: " << argv[0] << " <filename>" << std::endl;
-    return 1;
-  }
+	//------------------------------------------------------------------------//
+	// Read commandlines
+	//------------------------------------------------------------------------//
+	if (argc != 2)
+	{
+		std::cerr << "\nUsage: " << argv[0] << " <filename>" << std::endl;
+		return 1;
+	}
 
-  //------------------------------------------------------------------------//
-  // Read all test cases
-  //------------------------------------------------------------------------//
+	//------------------------------------------------------------------------//
+	// Read all test cases
+	//------------------------------------------------------------------------//
 	// 65 input values per row:   c +  32 of a/b
-  std::vector<uint32_t> allTests_c;              // input c
-  std::vector<std::vector<uint8_t>> allTests_ab; // input a/b
+	std::vector<uint16_t> allTests_c;			   // input c in f16
+	std::vector<std::vector<uint8_t>> allTests_ab; // input a/b in fp8
 
-  std::cout << "file : " << argv[1] << std::endl;
+	std::cout << "file : " << argv[1] << std::endl;
 
-  std::ifstream file(argv[1], std::ifstream::ate | std::ifstream::binary);
-  if (!file.is_open())
-  {
-    std::cerr << "Unable to open file " << argv[1] << std::endl;
-    return 1;
-    }
+	std::ifstream file(argv[1], std::ifstream::ate | std::ifstream::binary);
+	if (!file.is_open())
+	{
+		std::cerr << "Unable to open file " << argv[1] << std::endl;
+		return 1;
+	}
 
-    // Get the size of the file
-    std::streamsize fileSize = file.tellg();
-    file.seekg(0, std::ios::beg);
+	// Get the size of the file
+	std::streamsize fileSize = file.tellg();
+	file.seekg(0, std::ios::beg);
 
-    std::cout << "Read all the tests cases ... " << std::endl;
-    std::string line;
-    while (getline(file, line))
-    {
-        // read line :    c a0 b0 a1 b1 ....  aN bN
-        std::istringstream iss(line);
-        std::vector<uint8_t> numbers_ab;  // current line for a/b
-        std::string hexStr;
+	std::cout << "Read all the tests cases ... " << std::endl;
+	std::string line;
+	while (getline(file, line))
+	{
+		// read line :    c a0 b0 a1 b1 ....  aN bN
+		std::istringstream iss(line);
+		std::vector<uint8_t> numbers_ab; // current line for a/b
+		std::string hexStr;
 
-        // read c first
-        iss >> hexStr;
-        uint32_t num_c = static_cast<uint32_t>(std::stoul(hexStr, nullptr, 16));
-        allTests_c.push_back(num_c);  // store current line for C
+		// read c first
+		iss >> hexStr;
+		uint16_t num_c = static_cast<uint16_t>(std::stoul(hexStr, nullptr, 16));
+		allTests_c.push_back(num_c); // store current line for C
 
-        // read a/b
-        while (iss >> hexStr)
-        {
-            uint8_t num = static_cast<uint8_t>(std::stoul(hexStr, nullptr, 16));
-            numbers_ab.push_back(num);
-        }
+		// read a/b
+		while (iss >> hexStr)
+		{
+			uint8_t num = static_cast<uint8_t>(std::stoul(hexStr, nullptr, 16));
+			numbers_ab.push_back(num);
+		}
 
-        allTests_ab.push_back(numbers_ab); // store current line for a and b 
-    }
+		allTests_ab.push_back(numbers_ab); // store current line for a and b
+	}
 
-    std::cout << std::endl;
+	std::cout << std::endl;
 
-    file.close();
+	file.close();
 
-    //------------------------------------------------------------------------//
+	//------------------------------------------------------------------------//
     // Check first line : c + 32x{a(i), b(i)}
     //------------------------------------------------------------------------//
 #if DEBUG
     printf("\nCheck first line of input file:\n");
-    printf("%08X ", allTests_c[0]);
+
+    printf("%04X ", allTests_c[0]);
+
     for (int i = 0; i < 64; i++)
     {
         printf("%02X ", allTests_ab[0][i]);
@@ -368,6 +370,7 @@ int main(int argc, char **argv)
     printf("\n\n");
 #endif
 
+/*
     //------------------------------------------------------------------------//
     // Run all test cases
     //------------------------------------------------------------------------//
@@ -391,12 +394,10 @@ int main(int argc, char **argv)
       //--------------------------------------------------------------------//
       runTest<K32>(current_test_ab, current_test_c, current_result);
 
-#if DEBUG
-      // printf("%08X %08X\n", current_result[0], current_result[1]);
-#endif
       allTests_results[i] = current_result;
 
     }
+	*/
 
 /*
       for (int kernel_num : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
