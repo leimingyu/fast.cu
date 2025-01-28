@@ -274,7 +274,8 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 
 	if(tid == 0) {
 		// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
-		printf("[tid=%d] c0_lo=0x%04X \n", tid, c0_lo);
+		// printf("[tid=%d] c0_lo=0x%04X \n", tid, c0_lo);
+		printf("[tid=%d] \n", tid);
 	}
 }
 
