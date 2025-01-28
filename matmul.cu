@@ -291,7 +291,64 @@ __global__ void __launch_bounds__(NUM_THREADS) kernel_wgmma_fp8_e5m2(int M, int 
 	*/
 }
 
+// ---------------------------------------------------------------------
+// Kernel:	single block of 128 threads. We do a single 64x8x32 MMA
+// 			from FP8 E5M2 => accum in FP16, stored in two 32-bit regs.
+// ---------------------------------------------------------------------
+__global__ void matmul_fp8e5m2_64x8x32_kernel(
+	const uint8_t *A, // [64*32] = 2048 bytes
+	const uint8_t *B, // [32*8 ] = 256  bytes
+	uint32_t *C)	
+{
+	// // We'll copy entire A and B into SMEM. (No TMA, no advanced cp.async.)
+	// __shared__ fp8_e5m2_t sA[64 * 32]; // 2048 bytes
+	// __shared__ fp8_e5m2_t sB[32 * 8];  // 256 bytes
 
+	// // We'll do naive copy from global to shared:
+	// int tid = threadIdx.x;
+	// // Copy A (2048 elements)
+	// for (int i = tid; i < 64 * 32; i += blockDim.x)
+	// {
+	// 	sA[i] = A[i];
+	// }
+	// // Copy B (256 elements)
+	// for (int i = tid; i < 32 * 8; i += blockDim.x)
+	// {
+	// 	sB[i] = B[i];
+	// }
+	// __syncthreads();
+
+	// // Build SMEM descriptors for A/B. No swizzle.
+	// // For a 64x32 chunk: each row is 32 columns => ld_major=32, arbitrary ld_minor=1024
+	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/1024);
+
+	// // For a 32x8 chunk: each row is 8 columns => ld_major=8, arbitrary ld_minor=512
+	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/512);
+
+	// // Our accumulators: 2 x 32-bit registers => 4 total fp16 values
+	// uint32_t c0 = 0u, c1 = 0u;
+
+	// // Start the WGMMA group
+	// wgmma_fence();
+
+	// // One wgmma call for the entire 64x8x32
+	// // scaleD=1 => accumulate with existing data in c0,c1
+	// // scaleA=1 => unscaled input A
+	// // scaleB=1 => unscaled input B
+	// wgmma_m64n8k32_f16_e5m2_e5m2(descA, descB, c0, c1, /*scaleD=*/1, /*scaleA=*/1, /*scaleB=*/1);
+
+	// // Commit, then wait for group 0
+	// wgmma_commit_group();
+	// wgmma_wait_group<0>();
+
+	// // Now c0,c1 each hold two FP16 accumulators. In a real code,
+	// // you'd map lane IDs carefully to store each portion of the 64x8 tile.
+	// // For demonstration, we simply store c0,c1 from each thread to global mem.
+
+	// int store_idx = tid; // 0..127
+	// C[2 * store_idx + 0] = c0;
+	// C[2 * store_idx + 1] = c1;
+}
 
 //----------------------------------------------------------------------------//
 // Main 
@@ -506,28 +563,37 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	cudaMemcpy(dB, hB, sizeof(uint8_t) * sizeB, cudaMemcpyHostToDevice);
 	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
 
-	// launch 1 block
-	constexpr int BM = 64;
-	constexpr int BN = 8;
-	constexpr int BK = 32;
-	constexpr int NUM_THREADS = 128;
+	// Launch a single block with 128 threads => "1 warpgroup" in your test
+    matmul_fp8e5m2_64x8x32_kernel<<<1, 128>>>(dA, dB, dD);
 
-	CUtensorMap *d_tma_map_A = 0;
-	CUtensorMap *d_tma_map_B = 0;
+	// // launch 1 block
+	// constexpr int BM = 64;
+	// constexpr int BN = 8;
+	// constexpr int BK = 32;
+	// constexpr int NUM_THREADS = 128;
 
-	d_tma_map_A = allocate_and_create_tensor_map<uint8_t, BM, BK>(dA, M / BM, K / BK);
-	d_tma_map_B = allocate_and_create_tensor_map<uint8_t, BN, BK>(dB, N / BN, K / BK);
+	// CUtensorMap *d_tma_map_A = 0;
+	// CUtensorMap *d_tma_map_B = 0;
 
-	// reuse matmul kernel 2
-	kernel_wgmma_fp8_e5m2<
-		BM,
-		BN,
-		BK,
-		/*WGMMA_M*/ 64,
-		/*WGMMA_N*/ 8,
-		/*WGMMA_K*/ 32,
-		/*NUM_THREADS*/ NUM_THREADS>
-		<<<(M / BM) * (N / BN), NUM_THREADS>>>(M, N, K, dD, d_tma_map_A, d_tma_map_B);
+	// d_tma_map_A = allocate_and_create_tensor_map<uint8_t, BM, BK>(dA, M / BM, K / BK);
+	// d_tma_map_B = allocate_and_create_tensor_map<uint8_t, BN, BK>(dB, N / BN, K / BK);
+
+
+
+	// // reuse matmul kernel 2
+	// kernel_wgmma_fp8_e5m2<
+	// 	BM,
+	// 	BN,
+	// 	BK,
+	// 	/*WGMMA_M*/ 64,
+	// 	/*WGMMA_N*/ 8,
+	// 	/*WGMMA_K*/ 32,
+	// 	/*NUM_THREADS*/ NUM_THREADS>
+	// 	<<<(M / BM) * (N / BN), NUM_THREADS>>>(M, N, K, dD, d_tma_map_A, d_tma_map_B);
+
+
+
+
 
 	//------------------------------------------------------------------------//
 	// 1 warpgroup = 128 threads
@@ -576,12 +642,10 @@ void runTest(std::vector<uint8_t> current_test_ab,
 
 	cudaFree(dA);
 	cudaFree(dB);
-	// cudaFree(dC);
 	cudaFree(dD);
 
 	free(hA);
 	free(hB);
-	// free(hC);
 	free(hD);
 
 	cudaDeviceSynchronize();
