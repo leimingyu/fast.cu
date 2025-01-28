@@ -230,11 +230,20 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	__syncthreads();
 
     if(tid == 0) {
+        printf("\nsA\n");
         for (int i = 0; i < 64 * 32; i++)
         {
             if((i % 32) == 0) printf("\n");
             printf("%2X ", sA[i]);
         }
+
+        printf("\nsB\n");
+        for (int i = 0; i < 32 * 8; i++)
+        {
+            if((i % 8) == 0) printf("\n");
+            printf("%2X ", sB[i]);
+        }
+        printf("\n");
     }
 
 	// Build SMEM descriptors for A/B. No swizzle.
