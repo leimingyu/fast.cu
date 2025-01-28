@@ -70,7 +70,7 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 //----------------------------------------------------------------------------//
 template <int TILE_K>
 void runTest(std::vector<uint8_t> current_test_ab,
-             uint32_t current_test_c,
+             uint16_t current_test_c,
              std::vector<uint32_t> &current_result);
 
 
@@ -370,7 +370,6 @@ int main(int argc, char **argv)
     printf("\n\n");
 #endif
 
-/*
     //------------------------------------------------------------------------//
     // Run all test cases
     //------------------------------------------------------------------------//
@@ -378,12 +377,14 @@ int main(int argc, char **argv)
 
     // prepare results
     int totalNum = static_cast<int>(allTests_ab.size());
-    std::vector<std::vector<uint32_t>> allTests_results(totalNum);
+
+	// results in 32 results?
+    std::vector<std::vector<uint32_t>> allTests_results(totalNum); 
 
     for (int i = 0; i < totalNum; i++)
     {
       // each test inputs
-      uint32_t current_test_c = allTests_c[i];
+      uint16_t current_test_c = allTests_c[i];
       std::vector<uint8_t> current_test_ab = allTests_ab[i];
 
       // output
@@ -397,7 +398,6 @@ int main(int argc, char **argv)
       allTests_results[i] = current_result;
 
     }
-	*/
 
 /*
       for (int kernel_num : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
@@ -436,9 +436,11 @@ int main(int argc, char **argv)
 //----------------------------------------------------------------------------//
 template <int TILE_K>
 void runTest(std::vector<uint8_t> current_test_ab,
-			 uint32_t current_test_c,
+			 uint16_t current_test_c,
 			 std::vector<uint32_t> &current_result)
 {
+	//  C in f16 , A and B in FP8
+
 	//------------------------------------------------------------------------//
 	// total workload size M 64 x N 8 x K 32
 	//------------------------------------------------------------------------//
@@ -478,7 +480,15 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	}
 
 	std::cout << "Read input C" << std::endl;
-	hD[0] = current_test_c;
+	// pack fp16 into a 32 bit register
+	uint32_t packed = 0;
+	packed |= (uint32_t)current_test_c & 0xFFFF;    // put low half 
+	// packed |= ((uint32_t)half_hi & 0xFFFF) << 16;    // put high half 
+	hD[0] = packed; 
+
+    printf("packed into 32bit : %08X \n", hD[0]);
+
+
 
 	//------------------------------------------------------------------------//
 	// gpu buffer
