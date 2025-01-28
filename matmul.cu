@@ -236,6 +236,7 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
             if((i % 32) == 0) printf("\n");
             printf("%2X ", sA[i]);
         }
+        printf("\n");
 
         printf("\nsB\n");
         for (int i = 0; i < 32 * 8; i++)
@@ -479,9 +480,17 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	std::cout << "Read inputs a/b " << std::endl;
 	for (int i = 0; i < TILE_K; i++)
 	{
+        // MxK
 		hA[i] = current_test_ab[i * 2];		//  read a
-		hB[i] = current_test_ab[i * 2 + 1]; //  read b
+
+        // KxN
+		uint8_t val_b = current_test_ab[i * 2 + 1]; //  read b
+        hB[i * N] =  val_b;
 	}
+
+
+
+
 
 	std::cout << "Read input C" << std::endl;
 	// pack fp16 into a 32 bit register
