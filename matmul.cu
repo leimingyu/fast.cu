@@ -189,7 +189,7 @@ __device__ void wgmma64(float d[4][8], uint8_t *sA, uint8_t *sB) {
 //----------------------------------------------------------------------------//
 template <int BM, int BN, int BK, int WGMMA_M, int WGMMA_N, int WGMMA_K, int NUM_THREADS>
 __global__ void __launch_bounds__(NUM_THREADS) kernel_wgmma_fp8_e5m2(int M, int N, int K,
-																	 uint32_t *C, uint32_t *D,
+																	 uint32_t *D,
 																	 const CUtensorMap *tensorMapA, const CUtensorMap *tensorMapB)
 {
 
@@ -450,24 +450,20 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	uint8_t *hA = nullptr;
 	uint8_t *hB = nullptr;
 
-	uint32_t *hC = nullptr;
+	// uint32_t *hC = nullptr;  // accumulation update using D
 	uint32_t *hD = nullptr;
 
 	size_t sizeA = M * K;
 	size_t sizeB = N * K;
-	size_t sizeCD = M * N;
+	size_t sizeCD = M * N / 2;   // noted: for fp16 accumulation, each 32 reg will store two fp16 results
 
 	hA = (uint8_t *)malloc(sizeof(uint8_t) * sizeA);
 	hB = (uint8_t *)malloc(sizeof(uint8_t) * sizeB);
-
-	hC = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
 	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
 
 	// init to 0
 	memset(hA, 0, sizeof(uint8_t) * sizeA);
 	memset(hB, 0, sizeof(uint8_t) * sizeB);
-
-	memset(hC, 0, sizeof(uint32_t) * sizeCD);
 	memset(hD, 0, sizeof(uint32_t) * sizeCD);
 
 	//------------------------------------------------------------------------//
@@ -481,41 +477,22 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	}
 
 	std::cout << "Read input C" << std::endl;
-	hC[0] = current_test_c;
-
-	// // cpu buffer: two results in fp32
-	// // 1st : dotproduct of (a, b)
-	// // 2nd : dotproduct of (a, b) + C
-	// uint32_t *result_cpu = 0;
-	// result_cpu = (uint32_t *)malloc(sizeof(uint32_t) * 2);
+	hD[0] = current_test_c;
 
 	//------------------------------------------------------------------------//
 	// gpu buffer
 	//------------------------------------------------------------------------//
 	uint8_t *dA = nullptr;
 	uint8_t *dB = nullptr;
-	uint32_t *dC = nullptr;
 	uint32_t *dD = nullptr;
 
 	cudaMalloc((void **)&dA, sizeof(uint8_t) * sizeA);
 	cudaMalloc((void **)&dB, sizeof(uint8_t) * sizeB);
-
-	cudaMalloc((void **)&dC, sizeof(uint32_t) * sizeCD);
 	cudaMalloc((void **)&dD, sizeof(uint32_t) * sizeCD);
-
-	// float *buf_fp32 = 0;
-	// half *buf_fp16 = 0;
-	// cudaMalloc((void **)&buf_fp32, sizeof(float) * 1024);
-	// cudaMalloc((void **)&buf_fp16, sizeof(half) * 1024);
-
-	// // output buffer
-	// cudaMalloc((void **)&result_gpu, sizeof(uint32_t) * 2);
 
 	// h2d : copy input ops to gpu
 	cudaMemcpy(dA, hA, sizeof(uint8_t) * sizeA, cudaMemcpyHostToDevice);
 	cudaMemcpy(dB, hB, sizeof(uint8_t) * sizeB, cudaMemcpyHostToDevice);
-
-	cudaMemcpy(dC, hC, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
 	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
 
 	// launch 1 block
@@ -539,7 +516,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 		/*WGMMA_N*/ 8,
 		/*WGMMA_K*/ 32,
 		/*NUM_THREADS*/ NUM_THREADS>
-		<<<(M / BM) * (N / BN), NUM_THREADS>>>(M, N, K, dC, dD, d_tma_map_A, d_tma_map_B);
+		<<<(M / BM) * (N / BN), NUM_THREADS>>>(M, N, K, dD, d_tma_map_A, d_tma_map_B);
 
 	//------------------------------------------------------------------------//
 	// 1 warpgroup = 128 threads
@@ -588,12 +565,12 @@ void runTest(std::vector<uint8_t> current_test_ab,
 
 	cudaFree(dA);
 	cudaFree(dB);
-	cudaFree(dC);
+	// cudaFree(dC);
 	cudaFree(dD);
 
 	free(hA);
 	free(hB);
-	free(hC);
+	// free(hC);
 	free(hD);
 
 	cudaDeviceSynchronize();
