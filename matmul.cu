@@ -129,45 +129,45 @@ __device__ __forceinline__ void wgmma_wait_group() {
 
 
 
-template <typename Tin, int BlockMajorSize, int BlockMinorSize>
-void create_tensor_map(CUtensorMap *tma_map, Tin* gmem_ptr, int blocks_height, int blocks_width) {
-    void* gmem_address = (void*)gmem_ptr;
-    uint64_t gmem_prob_shape[5] = {(uint64_t)BlockMinorSize*blocks_width, (uint64_t)BlockMajorSize*blocks_height, 1, 1, 1};
-    uint64_t gmem_prob_stride[5] = {sizeof(Tin), sizeof(Tin) * BlockMinorSize*blocks_width, 0, 0, 0};
+// template <typename Tin, int BlockMajorSize, int BlockMinorSize>
+// void create_tensor_map(CUtensorMap *tma_map, Tin* gmem_ptr, int blocks_height, int blocks_width) {
+//     void* gmem_address = (void*)gmem_ptr;
+//     uint64_t gmem_prob_shape[5] = {(uint64_t)BlockMinorSize*blocks_width, (uint64_t)BlockMajorSize*blocks_height, 1, 1, 1};
+//     uint64_t gmem_prob_stride[5] = {sizeof(Tin), sizeof(Tin) * BlockMinorSize*blocks_width, 0, 0, 0};
 
-    uint32_t smem_box_shape[5] = {uint32_t(BlockMinorSize), uint32_t(BlockMajorSize), 1, 1, 1};
-    uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
+//     uint32_t smem_box_shape[5] = {uint32_t(BlockMinorSize), uint32_t(BlockMajorSize), 1, 1, 1};
+//     uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
 
-    CUresult result = cuTensorMapEncodeTiled(
-        tma_map,
-		// CU_TENSOR_MAP_DATA_TYPE_BFLOAT16,
-		CU_TENSOR_MAP_DATA_TYPE_UINT8,
-		2, gmem_address, gmem_prob_shape,
-        gmem_prob_stride + 1, smem_box_shape, smem_box_stride,
-		CU_TENSOR_MAP_INTERLEAVE_NONE,
-        // CU_TENSOR_MAP_SWIZZLE_128B,
-		CU_TENSOR_MAP_SWIZZLE_NONE,
-		CU_TENSOR_MAP_L2_PROMOTION_NONE,
-		CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
+//     CUresult result = cuTensorMapEncodeTiled(
+//         tma_map,
+// 		// CU_TENSOR_MAP_DATA_TYPE_BFLOAT16,
+// 		CU_TENSOR_MAP_DATA_TYPE_UINT8,
+// 		2, gmem_address, gmem_prob_shape,
+//         gmem_prob_stride + 1, smem_box_shape, smem_box_stride,
+// 		CU_TENSOR_MAP_INTERLEAVE_NONE,
+//         // CU_TENSOR_MAP_SWIZZLE_128B,
+// 		CU_TENSOR_MAP_SWIZZLE_NONE,
+// 		CU_TENSOR_MAP_L2_PROMOTION_NONE,
+// 		CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
 
-    assert(result == CUDA_SUCCESS);
-}
+//     assert(result == CUDA_SUCCESS);
+// }
 
 
 
-template <typename Tin ,int BlockMajorSize, int BlockMinorSize>
-__host__ static inline CUtensorMap* allocate_and_create_tensor_map(Tin* src, int blocks_height, int blocks_width) {
-	logMessage("%s", __func__);
-	logMessage("blocks height = %d", blocks_height);
-	logMessage("blocks width  = %d", blocks_width);
+// template <typename Tin ,int BlockMajorSize, int BlockMinorSize>
+// __host__ static inline CUtensorMap* allocate_and_create_tensor_map(Tin* src, int blocks_height, int blocks_width) {
+// 	logMessage("%s", __func__);
+// 	logMessage("blocks height = %d", blocks_height);
+// 	logMessage("blocks width  = %d", blocks_width);
 	
-    CUtensorMap *tma_map_d;
-    cudaMalloc(&tma_map_d, sizeof(CUtensorMap));
-    CUtensorMap tma_map_src;
-    create_tensor_map<Tin, BlockMajorSize, BlockMinorSize>(&tma_map_src, src, blocks_height, blocks_width);
-    cudaMemcpy(tma_map_d, &tma_map_src, sizeof(CUtensorMap), cudaMemcpyHostToDevice);  //  ?  d2d?
-    return tma_map_d;
-}
+//     CUtensorMap *tma_map_d;
+//     cudaMalloc(&tma_map_d, sizeof(CUtensorMap));
+//     CUtensorMap tma_map_src;
+//     create_tensor_map<Tin, BlockMajorSize, BlockMinorSize>(&tma_map_src, src, blocks_height, blocks_width);
+//     cudaMemcpy(tma_map_d, &tma_map_src, sizeof(CUtensorMap), cudaMemcpyHostToDevice);  //  ?  d2d?
+//     return tma_map_d;
+// }
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -459,8 +459,8 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	uint8_t *hA = nullptr;
 	uint8_t *hB = nullptr;
 
-	// uint32_t *hC = nullptr;  // accumulation update using D
 	uint32_t *hD = nullptr;
+	uint32_t *hresult = nullptr; 
 
 	size_t sizeA = M * K;
 	size_t sizeB = N * K;
@@ -469,6 +469,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	hA = (uint8_t *)malloc(sizeof(uint8_t) * sizeA);
 	hB = (uint8_t *)malloc(sizeof(uint8_t) * sizeB);
 	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
+	hresult = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
 
 	// init to 0
 	memset(hA, 0, sizeof(uint8_t) * sizeA);
@@ -524,15 +525,15 @@ void runTest(std::vector<uint8_t> current_test_ab,
     matmul_fp8e5m2_64x8x32_kernel<<<1, 128>>>(dA, dB, dD);
 
 	// d2h : copy results back to host
-	cudaMemcpy(hD, dD, sizeof(uint32_t) * sizeCD, cudaMemcpyDeviceToHost);
+	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeCD, cudaMemcpyDeviceToHost);
 
 // check value
 #if DEBUG
-	uint32_t c0 = hD[0];
+	uint32_t c0 = hresult[0];
 	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
 	uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 	printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
-	printf("%08X\n", hD[0]);
+	printf("%08X\n", hresult[0]);
 #endif
 
 	// current_result.push_back(result_cpu[0]);
@@ -546,6 +547,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	free(hA);
 	free(hB);
 	free(hD);
+	free(hresult);
 
 	cudaDeviceSynchronize();
 }
