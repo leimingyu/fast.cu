@@ -229,31 +229,26 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	}
 	__syncthreads();
 
-    if(tid == 0) {
-        printf("\nsA\n");
-        for (int i = 0; i < 64 * 32; i++)
-        {
-            if((i % 32) == 0) printf("\n");
-            printf("%2X ", sA[i]);
-        }
-        printf("\n");
+    // if(tid == 0) {
+    //     printf("\nsA\n");
+    //     for (int i = 0; i < 64 * 32; i++)
+    //     {
+    //         if((i % 32) == 0) printf("\n");
+    //         printf("%2X ", sA[i]);
+    //     }
+    //     printf("\n");
 
-        printf("\nsB\n");
-        for (int i = 0; i < 32 * 8; i++)
-        {
-            if((i % 8) == 0) printf("\n");
-            printf("%2X ", sB[i]);
-        }
-        printf("\n");
-    }
+    //     printf("\nsB\n");
+    //     for (int i = 0; i < 32 * 8; i++)
+    //     {
+    //         if((i % 8) == 0) printf("\n");
+    //         printf("%2X ", sB[i]);
+    //     }
+    //     printf("\n");
+    // }
 
 	// Build SMEM descriptors for A/B. No swizzle.
-	// For a 64x32 chunk: each row is 32 columns => ld_major=32, arbitrary ld_minor=1024
-	//uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/1024);
 	uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
-
-	// For a 32x8 chunk: each row is 8 columns => ld_major=8, arbitrary ld_minor=512
-	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/512);
 	uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/32);
 
 	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
@@ -404,7 +399,7 @@ int main(int argc, char **argv)
 		//--------------------------------------------------------------------//
 		runTest<K32>(current_test_ab, current_test_c, current_result);
 
-		allTests_results[i] = current_result;
+		// allTests_results[i] = current_result;
 	}
 
 /*
