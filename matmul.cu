@@ -483,9 +483,13 @@ void runTest(std::vector<uint8_t> current_test_ab,
         // MxK
 		hA[i] = current_test_ab[i * 2];		//  read a
 
-        // KxN
+        // // KxN
+		// uint8_t val_b = current_test_ab[i * 2 + 1]; //  read b
+        // hB[i * N] =  val_b;
+
+        // NxK
 		uint8_t val_b = current_test_ab[i * 2 + 1]; //  read b
-        hB[i * N] =  val_b;
+        hB[i] = val_b;
 	}
 
 
