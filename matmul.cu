@@ -475,6 +475,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	memset(hA, 0, sizeof(uint8_t) * sizeA);
 	memset(hB, 0, sizeof(uint8_t) * sizeB);
 	memset(hD, 0, sizeof(uint32_t) * sizeCD);
+	memset(hresult, 0, sizeof(uint32_t) * sizeCD);
 
 	//------------------------------------------------------------------------//
 	// read/set up data on cpu
