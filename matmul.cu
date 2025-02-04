@@ -74,9 +74,6 @@ void runTest(std::vector<uint8_t> current_test_ab,
              std::vector<uint32_t> &current_result);
 
 
-
-
-
 //----------------------------------------------------------------------------//
 // wgmma used in "examples/matmul/matmul_2.cuh"   (bf16)
 //----------------------------------------------------------------------------//
@@ -125,49 +122,6 @@ __device__ __forceinline__ void wgmma_wait_group() {
   static_assert(N >= 0 && N <= 7, "wgmma_wait_group: N must be in [0..7]");
   asm volatile("wgmma.wait_group.sync.aligned %0;\n" ::"n"(N) : "memory");
 }
-
-
-
-
-// template <typename Tin, int BlockMajorSize, int BlockMinorSize>
-// void create_tensor_map(CUtensorMap *tma_map, Tin* gmem_ptr, int blocks_height, int blocks_width) {
-//     void* gmem_address = (void*)gmem_ptr;
-//     uint64_t gmem_prob_shape[5] = {(uint64_t)BlockMinorSize*blocks_width, (uint64_t)BlockMajorSize*blocks_height, 1, 1, 1};
-//     uint64_t gmem_prob_stride[5] = {sizeof(Tin), sizeof(Tin) * BlockMinorSize*blocks_width, 0, 0, 0};
-
-//     uint32_t smem_box_shape[5] = {uint32_t(BlockMinorSize), uint32_t(BlockMajorSize), 1, 1, 1};
-//     uint32_t smem_box_stride[5] = {1, 1, 1, 1, 1};
-
-//     CUresult result = cuTensorMapEncodeTiled(
-//         tma_map,
-// 		// CU_TENSOR_MAP_DATA_TYPE_BFLOAT16,
-// 		CU_TENSOR_MAP_DATA_TYPE_UINT8,
-// 		2, gmem_address, gmem_prob_shape,
-//         gmem_prob_stride + 1, smem_box_shape, smem_box_stride,
-// 		CU_TENSOR_MAP_INTERLEAVE_NONE,
-//         // CU_TENSOR_MAP_SWIZZLE_128B,
-// 		CU_TENSOR_MAP_SWIZZLE_NONE,
-// 		CU_TENSOR_MAP_L2_PROMOTION_NONE,
-// 		CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE);
-
-//     assert(result == CUDA_SUCCESS);
-// }
-
-
-
-// template <typename Tin ,int BlockMajorSize, int BlockMinorSize>
-// __host__ static inline CUtensorMap* allocate_and_create_tensor_map(Tin* src, int blocks_height, int blocks_width) {
-// 	logMessage("%s", __func__);
-// 	logMessage("blocks height = %d", blocks_height);
-// 	logMessage("blocks width  = %d", blocks_width);
-	
-//     CUtensorMap *tma_map_d;
-//     cudaMalloc(&tma_map_d, sizeof(CUtensorMap));
-//     CUtensorMap tma_map_src;
-//     create_tensor_map<Tin, BlockMajorSize, BlockMinorSize>(&tma_map_src, src, blocks_height, blocks_width);
-//     cudaMemcpy(tma_map_d, &tma_map_src, sizeof(CUtensorMap), cudaMemcpyHostToDevice);  //  ?  d2d?
-//     return tma_map_d;
-// }
 
 
 //////////////////////////////////////////////////////////////////////////////
@@ -284,14 +238,10 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	// print the lower half of c0
 	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
     uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
-    // uint16_t c1_lo = static_cast<uint16_t>(c1 & 0xFFFF);
-    // uint16_t c1_hi = static_cast<uint16_t>((c1 >> 16) & 0xFFFF);
 
 	if(tid == 0) {
-		// printf("[tid=%d] c0_lo=0x%04X c0_hi=0x%04X  c1_lo=0x%04X c1_hi=0x%04X\n", tid, c0_lo, c0_hi, c1_lo, c1_hi);
-		printf("[tid=%d] c0_lo=0x%4X c0_hi=0x%4X  \n", tid, c0_lo, c0_hi);
-		// printf("[tid=%d] c0_lo=0x%4X \n", tid, c0_lo);
-		// printf("[tid=%d] \n", tid);
+		printf("[tid=%d] c0_lo=0x%4X \n", tid, c0_lo);
+		// printf("[tid=%d] c0_lo=0x%4X c0_hi=0x%4X  \n", tid, c0_lo, c0_hi);
 	}
 }
 
@@ -380,8 +330,8 @@ int main(int argc, char **argv)
     // prepare results
     int totalNum = static_cast<int>(allTests_ab.size());
 
-	// results in 32 results?
-    std::vector<std::vector<uint32_t>> allTests_results(totalNum);
+	// results in fp16 
+    std::vector<std::vector<uint16_t>> allTests_results(totalNum);
 
 	for (int i = 0; i < totalNum; i++)
 	{
@@ -391,46 +341,43 @@ int main(int argc, char **argv)
 		uint16_t current_test_c = allTests_c[i];
 		std::vector<uint8_t> current_test_ab = allTests_ab[i];
 
-		// output
-		std::vector<uint32_t> current_result;
+		// output in fp16
+		std::vector<uint16_t> current_result;
 
 		//--------------------------------------------------------------------//
 		// run tensor core test
 		//--------------------------------------------------------------------//
 		runTest<K32>(current_test_ab, current_test_c, current_result);
 
-		// allTests_results[i] = current_result;
+		allTests_results[i] = current_result;
 	}
 
-/*
-      for (int kernel_num : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}) {
-        // for (int kernel_num : {0, 11}) {
-        // Give the GPU some rest to avoid thermal throttling
-        sleep(5);
-        std::cout << "KERNEL " << kernel_num << std::endl;
-        // Verify against cuBLAS. Also serves as a warmup step.
-        if (run_verif) {
-          memset(C, 0, sizeof(bf16) * max_size * max_size);
-          cudaCheck(cudaMemcpy(dC, C, sizeof(bf16) * max_size * max_size, cudaMemcpyHostToDevice));
-          cudaCheck(cudaMemcpy(dC_ref, C, sizeof(bf16) * max_size * max_size, cudaMemcpyHostToDevice));
-          memset(DB, ~0, sizeof(int) * max_size * 128);
-          cudaCheck(cudaMemcpy(dDB, DB, sizeof(int) * max_size * 128,
-            cudaMemcpyHostToDevice));
-          run_kernel(0, m, n, k, dA, dB, dC_ref); // cuBLAS
-          run_kernel(kernel_num, m, n, k, dA, dB, dC, dDB); // Executes the kernel, modifies the result matrix
-          cudaCheck(cudaDeviceSynchronize());
-          cudaCheck(cudaGetLastError()); // Check for async errors during kernel run
-          cudaMemcpy(C, dC, sizeof(bf16) * max_size * max_size, cudaMemcpyDeviceToHost);
-          cudaMemcpy(C_ref, dC_ref, sizeof(bf16) * max_size * max_size, cudaMemcpyDeviceToHost);
+    //------------------------------------------------------------------------//
+    // Save to txt file 
+    //------------------------------------------------------------------------//
+    std::string outFileName = "gpu_output.txt";
+    std::ofstream outFile(outFileName);
+    if (!outFile)
+    {
+        std::cerr << "Error opening file to write." << std::endl;
+        return 1;
+    }
 
-          if (kernel_num > 1 && !verify_matrix(C_ref, C, m * n)) {
-            std::cout << "~~~~~~~~~~~~~~~~ Failed to pass the correctness verification against cuBLAS. ~~~~~~~~~~~~~~~~" << std::endl;
-            printf("%f\n", __bfloat162float(C_ref[m]));
-          }
+    const int colNum = 1;
+    for (int i = 0; i < totalNum; i++)
+    {
+        for (int j = 0; j < colNum; j++)
+        {
+            outFile << std::setfill('0') << std::setw(4) << std::hex << allTests_results[i][j];
+            // if (j < colNum) outFile << " "; // separate with space
+        }
+        outFile << "\n"; // EOR
+    }
 
-          cudaMemcpy(DB, dDB, sizeof(int) * max_size * 8, cudaMemcpyDeviceToHost);
+    outFile.close();
 
-      */
+    std::cout << "\nResults are saved! Check " << outFileName << ".\n";
+
     return 0;
 };
 
@@ -440,7 +387,7 @@ int main(int argc, char **argv)
 template <int TILE_K>
 void runTest(std::vector<uint8_t> current_test_ab,
 			 uint16_t current_test_c,
-			 std::vector<uint32_t> &current_result)
+			 std::vector<uint16_t> &current_result)
 {
 	//  C in f16 , A and B in FP8
 
@@ -498,7 +445,6 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	packed |= (uint32_t)current_test_c & 0xFFFF;    // put low half 
 	// packed |= ((uint32_t)half_hi & 0xFFFF) << 16;    // put high half 
 	hD[0] = packed; 
-
     printf("packed into 32bit : %08X \n\n", hD[0]);
 
 
@@ -525,18 +471,18 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	// d2h : copy results back to host
 	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeCD, cudaMemcpyDeviceToHost);
 
-// check value
-#if DEBUG
 	uint32_t c0 = hresult[0];
 	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
-	uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
-	printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
+	// uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+
+// check value
+#if DEBUG
 	printf("%08X\n", hresult[0]);
+	// printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
+	printf("c0_lo=0x%04X \n", c0_lo);
 #endif
 
-	// current_result.push_back(result_cpu[0]);
-	// current_result.push_back(result_cpu[1]);
-
+	current_result.push_back(c0_lo);
 
 	cudaFree(dA);
 	cudaFree(dB);
