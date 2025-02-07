@@ -23,13 +23,11 @@
 #include <cuda/barrier>
 #include <cublas_v2.h>
 #include <cuda_runtime.h>
-// #include <cuda_bf16.h>
 
-#define DEBUG 1
+
+#define DEBUG 0
 #define K32 32 
 #define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
-
-// typedef __nv_bfloat16 bf16;
 
 
 //----------------------------------------------------------------------------//
@@ -240,7 +238,7 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
     uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 
 	if(tid == 0) {
-		printf("[tid=%d] c0_lo=0x%4X \n", tid, c0_lo);
+		printf("kernel: tid=%d c0_lo=0x%4X \n", tid, c0_lo);
 		// printf("[tid=%d] c0_lo=0x%4X c0_hi=0x%4X  \n", tid, c0_lo, c0_hi);
 	}
 }
@@ -445,7 +443,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	packed |= (uint32_t)current_test_c & 0xFFFF;    // put low half 
 	// packed |= ((uint32_t)half_hi & 0xFFFF) << 16;    // put high half 
 	hD[0] = packed; 
-    printf("packed into 32bit : %08X \n\n", hD[0]);
+    printf("Pack input C (fp16) into 32bit register : %08X \n\n", hD[0]);
 
 
 
@@ -478,9 +476,11 @@ void runTest(std::vector<uint8_t> current_test_ab,
 // check value
 #if DEBUG
 	printf("%08X\n", hresult[0]);
-	// printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
 	printf("c0_lo=0x%04X \n", c0_lo);
+	// printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
 #endif
+
+	printf("\n\n");
 
 	current_result.push_back(c0_lo);
 
