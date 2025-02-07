@@ -16,14 +16,29 @@ for test_file in "$TEST_DIR"/*.txt; do
     
     # Run test for e4m3
     echo "Running e4m3 test for $filename..."
-    ./out/matmul "$test_file" e4m3
-
-    mv gpu_output.txt "${filename%.*}-result-e4m3.txt"
+    if ./out/matmul "$test_file" e4m3; then
+        if [ -f "gpu_output.txt" ]; then
+            mv gpu_output.txt "${filename%.*}-result-e4m3.txt"
+            echo "Successfully created ${filename%.*}-result-e4m3.txt"
+        else
+            echo "Warning: gpu_output.txt was not created for e4m3 test"
+        fi
+    else
+        echo "Error: e4m3 test failed for $filename"
+    fi
     
     # Run test for e5m2
     echo "Running e5m2 test for $filename..."
-    ./out/matmul "$test_file" e5m2
-    mv gpu_output.txt "${filename%.*}-result-e5m2.txt"
+    if ./out/matmul "$test_file" e5m2; then
+        if [ -f "gpu_output.txt" ]; then
+            mv gpu_output.txt "${filename%.*}-result-e5m2.txt"
+            echo "Successfully created ${filename%.*}-result-e5m2.txt"
+        else
+            echo "Warning: gpu_output.txt was not created for e5m2 test"
+        fi
+    else
+        echo "Error: e5m2 test failed for $filename"
+    fi
     
     echo "Completed tests for $filename"
     echo "----------------------------"
