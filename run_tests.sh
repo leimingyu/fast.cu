@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Directory containing test files
-TEST_DIR="feb7"
+TEST_DIR="./feb7"
 
 # Check if the directory exists
 if [ ! -d "$TEST_DIR" ]; then
@@ -17,6 +17,7 @@ for test_file in "$TEST_DIR"/*.txt; do
     # Run test for e4m3
     echo "Running e4m3 test for $filename..."
     ./out/matmul "$test_file" e4m3
+
     mv gpu_output.txt "${filename%.*}-result-e4m3.txt"
     
     # Run test for e5m2
