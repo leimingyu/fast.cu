@@ -70,7 +70,7 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 //----------------------------------------------------------------------------//
 // Functions 
 //----------------------------------------------------------------------------//
-template <int TILE_K>
+template <int TILE_K, FP8Format FORMAT>
 void runTest(std::vector<uint8_t> current_test_ab,
              uint16_t current_test_c,
              std::vector<uint16_t> &current_result);
