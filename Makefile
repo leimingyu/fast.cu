@@ -34,13 +34,7 @@ NVCC_BASE = nvcc $(NVCC_FLAGS) $(NVCC_LDFLAGS) -lineinfo $(NVCC_INCLUDES) $(NVCC
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
-##sum: sum.cu 
-##	$(NVCC_BASE) $^ $(CUDA_OUTPUT_FILE)
-##
-##sumprofile: sum
-##	$(NCU_COMMAND) -o $@ -f $(OUT_DIR)/$^
-
-matmul: matmul.cu 
+matmul: matmul.cu  $(OUT_DIR)
 	$(NVCC_BASE) $^ $(CUDA_OUTPUT_FILE)
 
 ##matmulprofile: matmul
