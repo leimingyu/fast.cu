@@ -375,15 +375,15 @@ int main(int argc, char **argv)
     //------------------------------------------------------------------------//
     std::cout << "\nRun Tensor Core Tests with " << format_str << " format\n" << std::endl;
 
-    // prepare results
-    int totalNum = static_cast<int>(allTests_ab.size());
+    // Change from int to size_t for totalNum
+    size_t totalNum = allTests_ab.size();
 
-	// results in fp16 
+    // results in fp16 
     std::vector<std::vector<uint16_t>> allTests_results(totalNum);
 
-	for (int i = 0; i < totalNum; i++)
-	{
-		logMessage("case : %d\n", i);
+    for (size_t i = 0; i < totalNum; i++)  // Change loop variable type to match
+    {
+        logMessage("case : %zu\n", i);  // Change format specifier from %d to %zu for size_t
 
 		// each test inputs
 		uint16_t current_test_c = allTests_c[i];
@@ -416,7 +416,7 @@ int main(int argc, char **argv)
     }
 
     const int colNum = 1;
-    for (int i = 0; i < totalNum; i++)
+    for (size_t i = 0; i < totalNum; i++)
     {
         for (int j = 0; j < colNum; j++)
         {
