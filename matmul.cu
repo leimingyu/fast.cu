@@ -17,7 +17,6 @@
 #include <cstdio>
 
 
-
 #include <cuda.h>
 #include <cudaTypedefs.h>
 #include <cuda/barrier>
@@ -25,9 +24,14 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 0
+#define DEBUG 1
 #define K32 32 
-#define CEIL_DIV(M, N) (((M) + (N)-1) / (N))
+
+// Add an enum for FP8 format type
+enum class FP8Format {
+    E5M2,
+    E4M3
+};
 
 
 //----------------------------------------------------------------------------//
@@ -154,11 +158,43 @@ void wgmma_m64n8k32_f16_e5m2_e5m2(
   );
 }
 
+// ref: https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L12984-L13022
+
+template<int scaleD, int scaleA, int scaleB>
+__device__ __forceinline__
+void wgmma_m64n8k32_f16_e4m3_e4m3(
+    uint64_t descA,
+    uint64_t descB,
+    uint32_t &c0,
+    uint32_t &c1)
+{
+  // scaleD is turned into a predicate (p) in PTX:
+  // if scaleD != 0 => accumulate; else => overwrite
+  asm volatile(
+    "{\n"
+    "  .reg .pred p;\n"
+    "  setp.ne.b32 p, %4, 0;\n"
+      "wgmma.mma_async.sync.aligned.m64n8k32.f16.e4m3.e4m3 "
+    "  { %0, %1 }, %2, %3, p, %5, %6;\n"
+    "}\n"
+    : "+r"(c0), "+r"(c1)
+    : "l"(descA), "l"(descB),
+      "n"((int32_t)scaleD),
+      "n"((int32_t)scaleA),
+      "n"((int32_t)scaleB)
+  );
+}
+
+
+
+
 // ---------------------------------------------------------------------
 // Kernel:	single block of 128 threads. We do a single 64x8x32 MMA
 // 			from FP8 E5M2 => accum in FP16, stored in two 32-bit regs.
 // ---------------------------------------------------------------------
-__global__ void matmul_fp8e5m2_64x8x32_kernel(
+// Modify the kernel to be templated
+template<FP8Format FORMAT>
+__global__ void matmul_fp8_64x8x32_kernel(
 	const uint8_t *A, // [64*32] = 2048 bytes
 	const uint8_t *B, // [32*8 ] = 256  bytes
 	uint32_t *C)	
@@ -215,11 +251,12 @@ __global__ void matmul_fp8e5m2_64x8x32_kernel(
 	// Start the WGMMA group
 	wgmma_fence();
 
-	// One wgmma call for the entire 64x8x32
-	// scaleD=1 => accumulate with existing data in c0,c1
-	// scaleA=1 => unscaled input A
-	// scaleB=1 => unscaled input B
-	wgmma_m64n8k32_f16_e5m2_e5m2<1,1,1>(descA, descB, c0, c1);
+	// Choose WGMMA implementation based on format
+	if constexpr (FORMAT == FP8Format::E5M2) {
+		wgmma_m64n8k32_f16_e5m2_e5m2<1,1,1>(descA, descB, c0, c1);
+	} else {
+		wgmma_m64n8k32_f16_e4m3_e4m3<1,1,1>(descA, descB, c0, c1);
+	}
 
 	// Commit, then wait for group 0
 	wgmma_commit_group();
@@ -251,9 +288,22 @@ int main(int argc, char **argv)
 	//------------------------------------------------------------------------//
 	// Read commandlines
 	//------------------------------------------------------------------------//
-	if (argc != 2)
+	if (argc != 3)
 	{
-		std::cerr << "\nUsage: " << argv[0] << " <filename>" << std::endl;
+		std::cerr << "\nUsage: " << argv[0] << " <filename> <format>" << std::endl;
+		std::cerr << "  format: e5m2 or e4m3" << std::endl;
+		return 1;
+	}
+
+	// Parse the format argument
+	std::string format_str = argv[2];
+	bool use_e5m2;
+	if (format_str == "e5m2") {
+		use_e5m2 = true;
+	} else if (format_str == "e4m3") {
+		use_e5m2 = false;
+	} else {
+		std::cerr << "Error: format must be either 'e5m2' or 'e4m3'" << std::endl;
 		return 1;
 	}
 
@@ -323,7 +373,7 @@ int main(int argc, char **argv)
     //------------------------------------------------------------------------//
     // Run all test cases
     //------------------------------------------------------------------------//
-    std::cout << "\nRun Tensor Core Tests\n" << std::endl;
+    std::cout << "\nRun Tensor Core Tests with " << format_str << " format\n" << std::endl;
 
     // prepare results
     int totalNum = static_cast<int>(allTests_ab.size());
@@ -345,7 +395,11 @@ int main(int argc, char **argv)
 		//--------------------------------------------------------------------//
 		// run tensor core test
 		//--------------------------------------------------------------------//
-		runTest<K32>(current_test_ab, current_test_c, current_result);
+		if (use_e5m2) {  // Add a command line argument or configuration to set this
+			runTest<K32, FP8Format::E5M2>(current_test_ab, current_test_c, current_result);
+		} else {
+			runTest<K32, FP8Format::E4M3>(current_test_ab, current_test_c, current_result);
+		}
 
 		allTests_results[i] = current_result;
 	}
@@ -382,7 +436,7 @@ int main(int argc, char **argv)
 //----------------------------------------------------------------------------//
 // host code to prepare test
 //----------------------------------------------------------------------------//
-template <int TILE_K>
+template <int TILE_K, FP8Format FORMAT>
 void runTest(std::vector<uint8_t> current_test_ab,
 			 uint16_t current_test_c,
 			 std::vector<uint16_t> &current_result)
@@ -434,9 +488,6 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	}
 
 
-
-
-
 	std::cout << "Read input C" << std::endl;
 	// pack fp16 into a 32 bit register
 	uint32_t packed = 0;
@@ -464,7 +515,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
 
 	// Launch a single block with 128 threads => "1 warpgroup" in your test
-    matmul_fp8e5m2_64x8x32_kernel<<<1, 128>>>(dA, dB, dD);
+    matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
 
 	// d2h : copy results back to host
 	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeCD, cudaMemcpyDeviceToHost);
