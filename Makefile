@@ -34,8 +34,8 @@ NVCC_BASE = nvcc $(NVCC_FLAGS) $(NVCC_LDFLAGS) -lineinfo $(NVCC_INCLUDES) $(NVCC
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
-matmul: matmul.cu  $(OUT_DIR)
-	$(NVCC_BASE) $^ $(CUDA_OUTPUT_FILE)
+matmul: $(OUT_DIR) matmul.cu
+	$(NVCC_BASE) matmul.cu $(CUDA_OUTPUT_FILE)
 
 ##matmulprofile: matmul
 ##	$(NCU_COMMAND) -o $@ -f $(OUT_DIR)/$^
