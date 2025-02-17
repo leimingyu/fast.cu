@@ -288,10 +288,11 @@ int main(int argc, char **argv)
 	//------------------------------------------------------------------------//
 	// Read commandlines
 	//------------------------------------------------------------------------//
-	if (argc != 3)
+	if (argc != 4)
 	{
-		std::cerr << "\nUsage: " << argv[0] << " <filename> <format>" << std::endl;
+		std::cerr << "\nUsage: " << argv[0] << " <filename> <format> <device_id>" << std::endl;
 		std::cerr << "  format: e5m2 or e4m3" << std::endl;
+		std::cerr << "  device_id: GPU device ID (0 to N-1)" << std::endl;
 		return 1;
 	}
 
@@ -306,6 +307,23 @@ int main(int argc, char **argv)
 		std::cerr << "Error: format must be either 'e5m2' or 'e4m3'" << std::endl;
 		return 1;
 	}
+
+	// Parse and set the device ID
+	int device_id = std::stoi(argv[3]);
+	int device_count;
+	cudaCheck(cudaGetDeviceCount(&device_count));
+	
+	if (device_id < 0 || device_id >= device_count) {
+		std::cerr << "Error: device_id must be between 0 and " << (device_count - 1) << std::endl;
+		return 1;
+	}
+
+	cudaCheck(cudaSetDevice(device_id));
+	
+	// Get and print device properties
+	cudaDeviceProp prop;
+	cudaCheck(cudaGetDeviceProperties(&prop, device_id));
+	logMessage("Using GPU device %d: %s", device_id, prop.name);
 
 	//------------------------------------------------------------------------//
 	// Read all test cases
