@@ -14,7 +14,6 @@ for test_file in "$TEST_DIR"/*.txt; do
     # Get just the filename without path
     filename=$(basename "$test_file")
     
-    
     # Run test for e5m2
     echo "Running e5m2 test for $filename..."
     if ./out/matmul "$test_file" e5m2; then
