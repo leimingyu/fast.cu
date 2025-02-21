@@ -370,14 +370,12 @@ int main(int argc, char **argv)
 
 		// Check if this is a K8/K16/K32 case
 		if (numbers_ab.size() == 32) {  // K16 case
-			// Pad with zeros to make it K32
+			// logMessage("K16 case detected - padded with zeros");
 			numbers_ab.resize(64, 0);  // Add 32 zeros
-			logMessage("K16 case detected - padded with zeros");
 		}
 		else if (numbers_ab.size() == 16) {  // K8 case
-			// Pad with zeros to make it K8
+			// logMessage("K8 case detected - padded with zeros");
 			numbers_ab.resize(64, 0);  // Add zeros
-			logMessage("K8 case detected - padded with zeros");
 		}
 		else if (numbers_ab.size() != 64) {
 			std::cerr << "Error: Invalid input line length. Expected 16 or 32 or 64 values for A/B, got " 
