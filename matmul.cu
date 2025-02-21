@@ -328,9 +328,10 @@ int main(int argc, char **argv)
 	//------------------------------------------------------------------------//
 	// Read all test cases
 	//------------------------------------------------------------------------//
-	// 65 input values per row:   c +  32 of a/b
-	std::vector<uint16_t> allTests_c;			   // input c in f16
-	std::vector<std::vector<uint8_t>> allTests_ab; // input a/b in fp8
+	// 65 input values per row:   c +  32 of a/b for K32 case
+	// 33 input values per row:   c +  16 of a/b for K16 case
+	std::vector<uint16_t> allTests_c;               // input c in f16
+	std::vector<std::vector<uint8_t>> allTests_ab;  // input a/b in fp8
 
 	std::cout << "file : " << argv[1] << std::endl;
 
@@ -364,6 +365,17 @@ int main(int argc, char **argv)
 		{
 			uint8_t num = static_cast<uint8_t>(std::stoul(hexStr, nullptr, 16));
 			numbers_ab.push_back(num);
+		}
+
+		// Check if this is a K16 case (32 values) or K32 case (64 values)
+		if (numbers_ab.size() == 32) {  // K16 case
+			// Pad with zeros to make it K32
+			numbers_ab.resize(64, 0);  // Add 32 zeros
+			logMessage("K16 case detected - padded with zeros");
+		} else if (numbers_ab.size() != 64) {
+			std::cerr << "Error: Invalid input line length. Expected 32 or 64 values for A/B, got " 
+					  << numbers_ab.size() << std::endl;
+			return 1;
 		}
 
 		allTests_ab.push_back(numbers_ab); // store current line for a and b
