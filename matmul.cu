@@ -330,6 +330,7 @@ int main(int argc, char **argv)
 	//------------------------------------------------------------------------//
 	// 65 input values per row:   c +  32 of a/b for K32 case
 	// 33 input values per row:   c +  16 of a/b for K16 case
+	// 17 input values per row:   c +   8 of a/b for  K8 case
 	std::vector<uint16_t> allTests_c;               // input c in f16
 	std::vector<std::vector<uint8_t>> allTests_ab;  // input a/b in fp8
 
@@ -367,13 +368,19 @@ int main(int argc, char **argv)
 			numbers_ab.push_back(num);
 		}
 
-		// Check if this is a K16 case (32 values) or K32 case (64 values)
+		// Check if this is a K8/K16/K32 case
 		if (numbers_ab.size() == 32) {  // K16 case
 			// Pad with zeros to make it K32
 			numbers_ab.resize(64, 0);  // Add 32 zeros
 			logMessage("K16 case detected - padded with zeros");
-		} else if (numbers_ab.size() != 64) {
-			std::cerr << "Error: Invalid input line length. Expected 32 or 64 values for A/B, got " 
+		}
+		else if (numbers_ab.size() == 16) {  // K8 case
+			// Pad with zeros to make it K8
+			numbers_ab.resize(64, 0);  // Add zeros
+			logMessage("K8 case detected - padded with zeros");
+		}
+		else if (numbers_ab.size() != 64) {
+			std::cerr << "Error: Invalid input line length. Expected 16 or 32 or 64 values for A/B, got " 
 					  << numbers_ab.size() << std::endl;
 			return 1;
 		}
