@@ -24,7 +24,7 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 1
+#define DEBUG 0
 #define K32 32 
 
 // Add an enum for FP8 format type
@@ -273,11 +273,12 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	// print the lower half of c0
 	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
     uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
-
+#if DEBUG
 	if(tid == 0) {
 		printf("kernel: tid=%d c0_lo=0x%4X \n", tid, c0_lo);
 		// printf("[tid=%d] c0_lo=0x%4X c0_hi=0x%4X  \n", tid, c0_lo, c0_hi);
 	}
+#endif
 }
 
 //----------------------------------------------------------------------------//
@@ -348,6 +349,7 @@ int main(int argc, char **argv)
 	file.seekg(0, std::ios::beg);
 
 	std::cout << "Read all the tests cases ... " << std::endl;
+
 	std::string line;
 	while (getline(file, line))
 	{
@@ -393,7 +395,7 @@ int main(int argc, char **argv)
 	//------------------------------------------------------------------------//
     // Check first line : c + 32x{a(i), b(i)}
     //------------------------------------------------------------------------//
-#if DEBUG
+#if 1 
     printf("\nCheck first line of input file:\n");
 
     printf("%04X ", allTests_c[0]);
@@ -511,7 +513,9 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	//------------------------------------------------------------------------//
 	// read/set up data on cpu
 	//------------------------------------------------------------------------//
+#if DEBUG
 	std::cout << "Read inputs a/b " << std::endl;
+#endif
 	for (int i = 0; i < TILE_K; i++)
 	{
         // MxK
@@ -523,13 +527,18 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	}
 
 
+#if DEBUG
 	std::cout << "Read input C" << std::endl;
+#endif
 	// pack fp16 into a 32 bit register
 	uint32_t packed = 0;
 	packed |= (uint32_t)current_test_c & 0xFFFF;    // put low half 
 	// packed |= ((uint32_t)half_hi & 0xFFFF) << 16;    // put high half 
 	hD[0] = packed; 
+
+#if DEBUG
     printf("Pack input C (fp16) into 32bit register : %08X \n\n", hD[0]);
+#endif
 
 
 
