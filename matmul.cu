@@ -223,40 +223,92 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	// read only the first 32 elements of A and B
 	if(tid < 32) {
 		//sA[tid * 64] = A[tid];
-		sA[tid] = A[tid];   // MxK
-		sB[tid*8] = B[tid]; // KxN
+		//sB[tid*8] = B[tid]; // KxN
+
+		//// try1: A is MxK, B is NxK
+		//sA[tid] = A[tid];
+		//sB[tid] = B[tid];
+
+		//// try2: A is MxK, B is KxN
+		//sA[tid] = A[tid];
+		//sB[tid*8] = B[tid];
+
+		// try3: A is KxN, B is KxN
+		sA[tid*64] = A[tid];
+		sB[tid*8] = B[tid];
 	}	
 	__syncthreads();
 
 
-    // if(tid == 0) {
-    //     printf("\nsA\n");
-    //     for (int i = 0; i < 64 * 32; i++)
+	/*
+	if(tid == 0) 
+	{
+		printf("\nsA\n");
+		for (int i = 0; i < 64 * 32; i++)
 
-    //     {
-    //         if((i % 32) == 0) printf("\n");
-    //         printf("%2X ", sA[i]);
-    //     }
-    //     printf("\n");
+		{
+			if((i % 32) == 0) printf("\n");
+			printf("%2X ", sA[i]);
+		}
+		printf("\n");
 
-    //     printf("\nsB\n");
-    //     for (int i = 0; i < 32 * 8; i++)
-    //     {
-    //         if((i % 8) == 0) printf("\n");
-    //         printf("%2X ", sB[i]);
-    //     }
-    //     printf("\n");
-    // }
+		printf("\nsB\n");
+		for (int i = 0; i < 32 * 8; i++)
+		{
+			if((i % 32) == 0) printf("\n");
+			printf("%2X ", sB[i]);
+		}
+		printf("\n");
+	}
+	*/
 
 	// Build SMEM descriptors for A/B. No swizzle.
+
+	//-----------//
+	// try1 :
+	//-----------//
+	// 16
+	//uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
+	//uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
+
+	// 16
+	//uint64_t descA = make_smem_desc(sA, 64, 32);
+	//uint64_t descB = make_smem_desc(sB, 32,  8);
+
+	// 16
+	//uint64_t descA = make_smem_desc(sA, 32,  64);
+	//uint64_t descB = make_smem_desc(sB, 8,  32);
+
+	//-----------//
+	// try2 :
+	//-----------//
+	// 2
+	//uint64_t descA = make_smem_desc(sA, 32, 64);
+	//uint64_t descB = make_smem_desc(sB, 32,  8);
+
+	//-----------//
+	// try3 :
+	//-----------//
+	// 1
+	//uint64_t descA = make_smem_desc(sA, 32, 64);
+	//uint64_t descB = make_smem_desc(sB, 32,  8);
+
+	// 2
+	uint64_t descA = make_smem_desc(sA, 64, 32);
+	uint64_t descB = make_smem_desc(sB, 8,  32);
+
+	//-----------//
+	// others: 
+	//-----------//
+
 	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
 	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
 
 	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
 	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
 
-	uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
-	uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/32);
+	//uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
+	//uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/32);
 
 	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
 	// C is 64x8 , each warp read 16x8 of inputC, there are 32 threads per warp, so each fiber hold 4 input values.
@@ -285,13 +337,17 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	// you'd map lane IDs carefully to store each portion of the 64x8 tile.
 	// For demonstration, we simply store c0,c1 from each thread to global mem.
 
+	// matrix C is 64x8
 	int store_idx = tid; // 0..127
-	C[2 * store_idx + 0] = c0;
-	C[2 * store_idx + 1] = c1;
+	if(tid == 0) {
+		C[tid] = c0;
+	}
+	// C[2 * store_idx + 0] = c0;
+	//C[2 * store_idx + 1] = c1;
 
 	// print the lower half of c0
 	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
-    uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+        uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 #if DEBUG
 	if(tid == 0) {
 		printf("kernel: tid=%d c0_lo=0x%4X \n", tid, c0_lo);
