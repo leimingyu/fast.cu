@@ -93,7 +93,8 @@ __device__ uint64_t make_smem_desc(uint8_t *base_ptr, int ld_major, int ld_minor
 {
   // Convert pointer to SMEM address
   uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(base_ptr));
-  uint64_t desc = 0ULL;
+
+  uint64_t desc = 0ULL; // default to 0 
 
   // Encode base address bits
   desc |= matrix_descriptor_encode(addr);
@@ -226,16 +227,16 @@ __global__ void matmul_fp8_64x8x32_kernel(
 		//sB[tid*8] = B[tid]; // KxN
 
 		//// try1: A is MxK, B is NxK
-		//sA[tid] = A[tid];
-		//sB[tid] = B[tid];
+		sA[tid] = A[tid];
+		sB[tid] = B[tid];
 
 		//// try2: A is MxK, B is KxN
 		//sA[tid] = A[tid];
 		//sB[tid*8] = B[tid];
 
 		// try3: A is KxN, B is KxN
-		sA[tid*64] = A[tid];
-		sB[tid*8] = B[tid];
+		// sA[tid*64] = A[tid];
+		// sB[tid*8] = B[tid];
 	}	
 	__syncthreads();
 
@@ -279,6 +280,10 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	//uint64_t descA = make_smem_desc(sA, 32,  64);
 	//uint64_t descB = make_smem_desc(sB, 8,  32);
 
+	uint64_t descA = make_smem_desc(sA, 32,  1024);
+	uint64_t descB = make_smem_desc(sB, 32,  1024);
+
+
 	//-----------//
 	// try2 :
 	//-----------//
@@ -294,8 +299,8 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	//uint64_t descB = make_smem_desc(sB, 32,  8);
 
 	// 2
-	uint64_t descA = make_smem_desc(sA, 64, 32);
-	uint64_t descB = make_smem_desc(sB, 8,  32);
+	// uint64_t descA = make_smem_desc(sA, 64, 32);
+	// uint64_t descB = make_smem_desc(sB, 8,  32);
 
 	//-----------//
 	// others: 
