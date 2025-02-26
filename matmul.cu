@@ -24,7 +24,7 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 0
+#define DEBUG 1
 #define K32 32 
 
 // Add an enum for FP8 format type
