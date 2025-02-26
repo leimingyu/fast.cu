@@ -222,7 +222,7 @@ __global__ void matmul_fp8_64x8x32_kernel(
 
 	// read only the first 32 elements of A and B
 	if(tid < 32) {
-		sA[tid] = A[tid];
+		sA[tid * 64] = A[tid];
 		sB[tid] = B[tid];
 	}	
 	__syncthreads();
