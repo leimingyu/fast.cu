@@ -205,21 +205,33 @@ __global__ void matmul_fp8_64x8x32_kernel(
 
 	// We'll do naive copy from global to shared:
 	int tid = threadIdx.x;
-	// Copy A (2048 elements)
+
+	// set shared memory to 0
 	for (int i = tid; i < 64 * 32; i += blockDim.x)
 	{
-		sA[i] = A[i];
+		// sA[i] = A[i];
+		sA[i] = 0;
 	}
-	// Copy B (256 elements)
+
 	for (int i = tid; i < 32 * 8; i += blockDim.x)
 	{
-		sB[i] = B[i];
+		// sB[i] = B[i];
+		sB[i] = 0; 
 	}
 	__syncthreads();
+
+	// read only the first 32 elements of A and B
+	if(tid < 32) {
+		sA[tid] = A[tid];
+		sB[tid] = B[tid];
+	}	
+	__syncthreads();
+
 
     // if(tid == 0) {
     //     printf("\nsA\n");
     //     for (int i = 0; i < 64 * 32; i++)
+
     //     {
     //         if((i % 32) == 0) printf("\n");
     //         printf("%2X ", sA[i]);
@@ -236,7 +248,10 @@ __global__ void matmul_fp8_64x8x32_kernel(
     // }
 
 	// Build SMEM descriptors for A/B. No swizzle.
-	uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
+	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
+	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
+
+	uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
 	uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
 
 	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
@@ -397,20 +412,18 @@ int main(int argc, char **argv)
     //------------------------------------------------------------------------//
 #if 1 
     printf("\nCheck first line of input file:\n");
-
     printf("%04X ", allTests_c[0]);
-
     for (int i = 0; i < 64; i++)
     {
         printf("%02X ", allTests_ab[0][i]);
     }
-    printf("\n\n");
+     printf("\n");
 #endif
 
     //------------------------------------------------------------------------//
     // Run all test cases
     //------------------------------------------------------------------------//
-    std::cout << "\nRun Tensor Core Tests with " << format_str << " format\n" << std::endl;
+    std::cout << "Run Tensor Core Tests with " << format_str << " format\n" << std::endl;
 
     // Change from int to size_t for totalNum
     size_t totalNum = allTests_ab.size();
@@ -498,18 +511,18 @@ void runTest(std::vector<uint8_t> current_test_ab,
 
 	size_t sizeA = M * K;
 	size_t sizeB = N * K;
-	size_t sizeCD = M * N / 2;   // noted: for fp16 accumulation, each 32 reg will store two fp16 results
+	size_t sizeD = M * N;   // noted: for fp16 accumulation, each 32 reg will store two fp16 results
 
 	hA = (uint8_t *)malloc(sizeof(uint8_t) * sizeA);
 	hB = (uint8_t *)malloc(sizeof(uint8_t) * sizeB);
-	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
-	hresult = (uint32_t *)malloc(sizeof(uint32_t) * sizeCD);
+	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
+	hresult = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
 
 	// init to 0
-	memset(hA, 0, sizeof(uint8_t) * sizeA);
-	memset(hB, 0, sizeof(uint8_t) * sizeB);
-	memset(hD, 0, sizeof(uint32_t) * sizeCD);
-	memset(hresult, 0, sizeof(uint32_t) * sizeCD);
+	memset(hA, 0, sizeof(uint8_t) * sizeA);  // MxK
+	memset(hB, 0, sizeof(uint8_t) * sizeB); // NxK
+	memset(hD, 0, sizeof(uint32_t) * sizeD); // MxN
+	memset(hresult, 0, sizeof(uint32_t) * sizeD);
 
 	//------------------------------------------------------------------------//
 	// read/set up data on cpu
@@ -519,7 +532,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 #endif
 	for (int i = 0; i < TILE_K; i++)
 	{
-        // MxK
+        // MxK:   only first 32 elements are intiliazed, the rest are 0
 		hA[i] = current_test_ab[i * 2];		//  read a
 
         // NxK
@@ -552,21 +565,21 @@ void runTest(std::vector<uint8_t> current_test_ab,
 
 	cudaMalloc((void **)&dA, sizeof(uint8_t) * sizeA);
 	cudaMalloc((void **)&dB, sizeof(uint8_t) * sizeB);
-	cudaMalloc((void **)&dD, sizeof(uint32_t) * sizeCD);
+	cudaMalloc((void **)&dD, sizeof(uint32_t) * sizeD);
 
 	// h2d : copy input ops to gpu
 	cudaMemcpy(dA, hA, sizeof(uint8_t) * sizeA, cudaMemcpyHostToDevice);
 	cudaMemcpy(dB, hB, sizeof(uint8_t) * sizeB, cudaMemcpyHostToDevice);
-	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeCD, cudaMemcpyHostToDevice);
+	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeD, cudaMemcpyHostToDevice);
 
-	// Launch a single block with 128 threads => "1 warpgroup" in your test
+	// Launch a single block with 128 threads => "1 warpgroup" (4 warps, 32 threads per warp)
     matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
 
 	// d2h : copy results back to host
-	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeCD, cudaMemcpyDeviceToHost);
+	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeD, cudaMemcpyDeviceToHost);
 
 	uint32_t c0 = hresult[0];
-	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
+	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);   // read the lower half (1st 16 bits)
 	// uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 
 // check value
