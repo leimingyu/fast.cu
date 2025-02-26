@@ -249,11 +249,14 @@ __global__ void matmul_fp8_64x8x32_kernel(
     // }
 
 	// Build SMEM descriptors for A/B. No swizzle.
-	uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
-	uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
+	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
+	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
 
 	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
 	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
+
+	uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
+	uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/32);
 
 	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
 	// C is 64x8 , each warp read 16x8 of inputC, there are 32 threads per warp, so each fiber hold 4 input values.
