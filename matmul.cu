@@ -456,7 +456,7 @@ int main(int argc, char **argv)
     for (size_t i = 0; i < totalNum; i++)  // Change loop variable type to match
     {
 
-	if((i%1000) == 0)  logMessage("case : %zu (status: %d done) \n", i,  i/(float)totalNum);  // Change format specifier from %d to %zu for size_t
+	if((i%1000) == 0)  logMessage("case : %zu (status: %f done) \n", i,  i/(float)totalNum);  // Change format specifier from %d to %zu for size_t
 
 		// each test inputs
 		uint16_t current_test_c = allTests_c[i];
