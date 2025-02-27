@@ -233,7 +233,11 @@ __global__ void matmul_fp8_64x8x32_kernel(
 
 		//// try1: A is MxK, B is NxK
 		sA[tid] = A[tid];
+		//sA[tid+32] = A[tid];
+		//sA[tid+64] = A[tid];
 		sB[tid] = B[tid];
+		//sB[tid+32] = B[tid];
+		//sB[tid+64] = B[tid];
 	}	
 	__syncthreads();
 
