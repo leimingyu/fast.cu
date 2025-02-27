@@ -203,8 +203,11 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	uint32_t *C)	
 {
 	// We'll copy entire A and B into SMEM. (No TMA, no advanced cp.async.)
-	__shared__ uint8_t sA[64 * 32]; // 2048 bytes
-	__shared__ uint8_t sB[32 * 8];  // 256 bytes
+	//__shared__ uint8_t sA[64 * 32]; // 2048 bytes
+	//__shared__ uint8_t sB[32 * 8];  // 256 bytes
+
+	__shared__ alignas(128) uint8_t sA[64 * 64];
+	__shared__ alignas(128) uint8_t sB[64 * 64];
 
 	// We'll do naive copy from global to shared:
 	int tid = threadIdx.x;
@@ -229,12 +232,12 @@ __global__ void matmul_fp8_64x8x32_kernel(
 		//sB[tid*8] = B[tid]; // KxN
 
 		//// try1: A is MxK, B is NxK
-		// sA[tid] = A[tid];
-		// sB[tid] = B[tid];
+		sA[tid] = A[tid];
+		sB[tid] = B[tid];
 
 		//// try2: A is MxK, B is KxN
-		sA[tid] = A[tid];
-		sB[tid*8] = B[tid];
+		//sA[tid] = A[tid];
+		//sB[tid*8] = B[tid];
 
 		// try3: A is KxN, B is KxN
 		// sA[tid*64] = A[tid];
@@ -270,6 +273,9 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	//-----------//
 	// try1 :
 	//-----------//
+	uint64_t descA = make_smem_desc(&sA[0], 16, 1024);
+	uint64_t descB = make_smem_desc(&sB[0], 16, 1024);
+
 	// 16
 	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
 	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
@@ -298,8 +304,8 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	//uint64_t descA = make_smem_desc(sA, 32, 64);
 	//uint64_t descB = make_smem_desc(sB, 32,  8);
 
-	uint64_t descA = make_smem_desc(sA, 32, 32);
-	uint64_t descB = make_smem_desc(sB, 32, 32);
+	//uint64_t descA = make_smem_desc(sA, 32, 32);
+	//uint64_t descB = make_smem_desc(sB, 32, 32);
 
 
 	//-----------//
