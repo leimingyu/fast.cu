@@ -93,19 +93,17 @@ __device__ uint64_t make_smem_desc(uint8_t *base_ptr, int ld_major, int ld_minor
 {
   // Convert pointer to SMEM address
   uint32_t addr = static_cast<uint32_t>(__cvta_generic_to_shared(base_ptr));
-
   uint64_t desc = 0ULL; // default to 0 
 
   // Encode base address bits
   desc |= matrix_descriptor_encode(addr);
-
   // Encode leading dimensions (ld_major, ld_minor)
-//   desc |= (matrix_descriptor_encode((uint64_t)ld_major) << 16);  // leading dimentin byte offset
-//   desc |= (matrix_descriptor_encode((uint64_t)ld_minor) << 32);  // stide dimension byte offset
+  desc |= (matrix_descriptor_encode((uint64_t)ld_major) << 16);  // leading dimentin byte offset
+  desc |= (matrix_descriptor_encode((uint64_t)ld_minor) << 32);  // stide dimension byte offset
 
-	// no swi
-  desc |= (((uint64_t)ld_major) << 16);  // leading dimentin byte offset
-  desc |= (((uint64_t)ld_minor) << 32);  // stide dimension byte offset
+// 	// no swi
+//   desc |= (((uint64_t)ld_major) << 16);  // leading dimentin byte offset
+//   desc |= (((uint64_t)ld_minor) << 32);  // stide dimension byte offset
 
   // Turn off the 128B swizzle => do *not* set bit 62
   // desc |= (1ULL << 62);  // <--- commented out for no swizzling
