@@ -24,7 +24,7 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 1
+#define DEBUG 0
 #define K32 32 
 
 // Add an enum for FP8 format type
@@ -559,7 +559,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 
         // NxK
 		uint8_t val_b = current_test_ab[i * 2 + 1]; //  read b
-        hB[i] = val_b;
+                hB[i] = val_b;
 	}
 
 
@@ -595,7 +595,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeD, cudaMemcpyHostToDevice);
 
 	// Launch a single block with 128 threads => "1 warpgroup" (4 warps, 32 threads per warp)
-    matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
+        matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
 
 	// d2h : copy results back to host
 	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeD, cudaMemcpyDeviceToHost);
@@ -611,7 +611,7 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	// printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
 #endif
 
-	printf("\n\n");
+	//printf("\n\n");
 
 	current_result.push_back(c0_lo);
 
