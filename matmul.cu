@@ -100,8 +100,12 @@ __device__ uint64_t make_smem_desc(uint8_t *base_ptr, int ld_major, int ld_minor
   desc |= matrix_descriptor_encode(addr);
 
   // Encode leading dimensions (ld_major, ld_minor)
-  desc |= (matrix_descriptor_encode((uint64_t)ld_major) << 16);  // leading dimentin byte offset
-  desc |= (matrix_descriptor_encode((uint64_t)ld_minor) << 32);  // stide dimension byte offset
+//   desc |= (matrix_descriptor_encode((uint64_t)ld_major) << 16);  // leading dimentin byte offset
+//   desc |= (matrix_descriptor_encode((uint64_t)ld_minor) << 32);  // stide dimension byte offset
+
+	// no swi
+  desc |= (((uint64_t)ld_major) << 16);  // leading dimentin byte offset
+  desc |= (((uint64_t)ld_minor) << 32);  // stide dimension byte offset
 
   // Turn off the 128B swizzle => do *not* set bit 62
   // desc |= (1ULL << 62);  // <--- commented out for no swizzling
@@ -227,12 +231,12 @@ __global__ void matmul_fp8_64x8x32_kernel(
 		//sB[tid*8] = B[tid]; // KxN
 
 		//// try1: A is MxK, B is NxK
-		sA[tid] = A[tid];
-		sB[tid] = B[tid];
+		// sA[tid] = A[tid];
+		// sB[tid] = B[tid];
 
 		//// try2: A is MxK, B is KxN
-		//sA[tid] = A[tid];
-		//sB[tid*8] = B[tid];
+		sA[tid] = A[tid];
+		sB[tid*8] = B[tid];
 
 		// try3: A is KxN, B is KxN
 		// sA[tid*64] = A[tid];
@@ -269,8 +273,8 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	// try1 :
 	//-----------//
 	// 16
-	//uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
-	//uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
+	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
+	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
 
 	// 16
 	//uint64_t descA = make_smem_desc(sA, 64, 32);
@@ -284,8 +288,9 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	//uint64_t descA = make_smem_desc(sA, 32,  1024);
 	//uint64_t descB = make_smem_desc(sB, 32,  1024);
 
-	uint64_t descA = make_smem_desc(sA, 32,  2048);
-	uint64_t descB = make_smem_desc(sB, 32,  128);
+	// 0
+	// uint64_t descA = make_smem_desc(sA, 32,  2048);
+	// uint64_t descB = make_smem_desc(sB, 32,  128);
 
 
 	//-----------//
@@ -294,6 +299,10 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	// 2
 	//uint64_t descA = make_smem_desc(sA, 32, 64);
 	//uint64_t descB = make_smem_desc(sB, 32,  8);
+
+	uint64_t descA = make_smem_desc(sA, 32, 64);
+	uint64_t descB = make_smem_desc(sB, 8,  32);
+
 
 	//-----------//
 	// try3 :
