@@ -234,14 +234,6 @@ __global__ void matmul_fp8_64x8x32_kernel(
 		//// try1: A is MxK, B is NxK
 		sA[tid] = A[tid];
 		sB[tid] = B[tid];
-
-		//// try2: A is MxK, B is KxN
-		//sA[tid] = A[tid];
-		//sB[tid*8] = B[tid];
-
-		// try3: A is KxN, B is KxN
-		// sA[tid*64] = A[tid];
-		// sB[tid*8] = B[tid];
 	}	
 	__syncthreads();
 
@@ -275,62 +267,6 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	//-----------//
 	uint64_t descA = make_smem_desc(&sA[0], 16, 1024);
 	uint64_t descB = make_smem_desc(&sB[0], 16, 1024);
-
-	// 16
-	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
-	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
-
-	// 16
-	//uint64_t descA = make_smem_desc(sA, 64, 32);
-	//uint64_t descB = make_smem_desc(sB, 32,  8);
-
-	// 16
-	//uint64_t descA = make_smem_desc(sA, 32,  64);
-	//uint64_t descB = make_smem_desc(sB, 8,  32);
-
-	// 0
-	//uint64_t descA = make_smem_desc(sA, 32,  1024);
-	//uint64_t descB = make_smem_desc(sB, 32,  1024);
-
-	// 0
-	// uint64_t descA = make_smem_desc(sA, 32,  2048);
-	// uint64_t descB = make_smem_desc(sB, 32,  128);
-
-
-	//-----------//
-	// try2 :
-	//-----------//
-	// 2
-	//uint64_t descA = make_smem_desc(sA, 32, 64);
-	//uint64_t descB = make_smem_desc(sB, 32,  8);
-
-	//uint64_t descA = make_smem_desc(sA, 32, 32);
-	//uint64_t descB = make_smem_desc(sB, 32, 32);
-
-
-	//-----------//
-	// try3 :
-	//-----------//
-	// 1
-	//uint64_t descA = make_smem_desc(sA, 32, 64);
-	//uint64_t descB = make_smem_desc(sB, 32,  8);
-
-	// 2
-	// uint64_t descA = make_smem_desc(sA, 64, 32);
-	// uint64_t descB = make_smem_desc(sB, 8,  32);
-
-	//-----------//
-	// others: 
-	//-----------//
-
-	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/32, /*ld_minor=*/64);
-	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
-
-	// uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
-	// uint64_t descB = make_smem_desc(sB, /*ld_major=*/32, /*ld_minor=*/8);
-
-	//uint64_t descA = make_smem_desc(sA, /*ld_major=*/64, /*ld_minor=*/32);
-	//uint64_t descB = make_smem_desc(sB, /*ld_major=*/8, /*ld_minor=*/32);
 
 	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
 	// C is 64x8 , each warp read 16x8 of inputC, there are 32 threads per warp, so each fiber hold 4 input values.
