@@ -72,8 +72,8 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 //----------------------------------------------------------------------------//
 template <int TILE_K, FP8Format FORMAT>
 void runTest(std::vector<uint8_t> current_test_ab,
-             uint16_t current_test_c,
-             std::vector<uint16_t> &current_result);
+             uint32_t current_test_c,
+             std::vector<uint32_t> &current_result);
 
 
 //----------------------------------------------------------------------------//
