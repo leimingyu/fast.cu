@@ -144,7 +144,7 @@ void wgmma_m64n8k32_f32_e5m2_e5m2(
     uint32_t &d0,
     uint32_t &d1,
     uint32_t &d2,
-    uint32_t &d3,
+    uint32_t &d3
 	)
 {
   // scaleD is turned into a predicate (p) in PTX:
@@ -176,7 +176,7 @@ void wgmma_m64n8k32_f32_e5m2_e5m2(
       : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
       :  "l"(descA),
          "l"(descB),
-         "n"(int32_t(scale_D)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
+         "n"(int32_t(scaleD)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
 
 }
 
@@ -222,7 +222,7 @@ asm volatile(
 	: "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
 	: "l"(descA),
 	  "l"(descB),
-	  "n"(int32_t(scale_D)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
+	  "n"(int32_t(scaleD)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
 }
 
 
