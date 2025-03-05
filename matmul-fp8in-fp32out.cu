@@ -134,58 +134,95 @@ __device__ __forceinline__ void wgmma_wait_group() {
 // storing two 32-bit accumulators (c0, c1).
 //////////////////////////////////////////////////////////////////////////////
 
-// ref:  https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L19019C1-L19052C3
+// ref: https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L19080
 
 template<int scaleD, int scaleA, int scaleB>
 __device__ __forceinline__
-void wgmma_m64n8k32_f16_e5m2_e5m2(
+void wgmma_m64n8k32_f32_e5m2_e5m2(
     uint64_t descA,
     uint64_t descB,
-    uint32_t &c0,
-    uint32_t &c1)
+    uint32_t &d0,
+    uint32_t &d1,
+    uint32_t &d2,
+    uint32_t &d3,
+	)
 {
   // scaleD is turned into a predicate (p) in PTX:
   // if scaleD != 0 => accumulate; else => overwrite
-  asm volatile(
+//   asm volatile(
+//     "{\n"
+//     "  .reg .pred p;\n"
+//     "  setp.ne.b32 p, %4, 0;\n"
+//     "  wgmma.mma_async.sync.aligned.m64n8k32.f32.e5m2.e5m2 "
+//     "  { %0, %1 }, %2, %3, p, %5, %6;\n"
+//     "}\n"
+//     : "+r"(c0), "+r"(c1)
+//     : "l"(descA), "l"(descB),
+//       "n"((int32_t)scaleD),
+//       "n"((int32_t)scaleA),
+//       "n"((int32_t)scaleB)
+//   );
+
+    asm volatile(
     "{\n"
-    "  .reg .pred p;\n"
-    "  setp.ne.b32 p, %4, 0;\n"
-    "  wgmma.mma_async.sync.aligned.m64n8k32.f16.e5m2.e5m2 "
-    "  { %0, %1 }, %2, %3, p, %5, %6;\n"
+      ".reg .pred p;\n"
+      "setp.ne.b32 p, %6, 0;\n"
+      "wgmma.mma_async.sync.aligned.m64n8k32.f32.e5m2.e5m2 "
+      "{%0,  %1,  %2,  %3},"
+      " %4,"
+      " %5,"
+      " p,   %7,  %8;\n"
     "}\n"
-    : "+r"(c0), "+r"(c1)
-    : "l"(descA), "l"(descB),
-      "n"((int32_t)scaleD),
-      "n"((int32_t)scaleA),
-      "n"((int32_t)scaleB)
-  );
+      : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+      :  "l"(descA),
+         "l"(descB),
+         "n"(int32_t(scale_D)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
+
 }
 
-// ref: https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L12984-L13022
+// ref: https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L13092
 
 template<int scaleD, int scaleA, int scaleB>
 __device__ __forceinline__
-void wgmma_m64n8k32_f16_e4m3_e4m3(
+void wgmma_m64n8k32_f32_e4m3_e4m3(
     uint64_t descA,
     uint64_t descB,
-    uint32_t &c0,
-    uint32_t &c1)
+    uint32_t &d0,
+    uint32_t &d1,
+    uint32_t &d2,
+    uint32_t &d3
+	)
 {
-  // scaleD is turned into a predicate (p) in PTX:
-  // if scaleD != 0 => accumulate; else => overwrite
-  asm volatile(
-    "{\n"
-    "  .reg .pred p;\n"
-    "  setp.ne.b32 p, %4, 0;\n"
-      "wgmma.mma_async.sync.aligned.m64n8k32.f16.e4m3.e4m3 "
-    "  { %0, %1 }, %2, %3, p, %5, %6;\n"
-    "}\n"
-    : "+r"(c0), "+r"(c1)
-    : "l"(descA), "l"(descB),
-      "n"((int32_t)scaleD),
-      "n"((int32_t)scaleA),
-      "n"((int32_t)scaleB)
-  );
+//   // scaleD is turned into a predicate (p) in PTX:
+//   // if scaleD != 0 => accumulate; else => overwrite
+//   asm volatile(
+//     "{\n"
+//     "  .reg .pred p;\n"
+//     "  setp.ne.b32 p, %4, 0;\n"
+//       "wgmma.mma_async.sync.aligned.m64n8k32.f32.e4m3.e4m3 "
+//     "  { %0, %1 }, %2, %3, p, %5, %6;\n"
+//     "}\n"
+//     : "+r"(c0), "+r"(c1)
+//     : "l"(descA), "l"(descB),
+//       "n"((int32_t)scaleD),
+//       "n"((int32_t)scaleA),
+//       "n"((int32_t)scaleB)
+//   );
+
+asm volatile(
+	"{\n"
+	".reg .pred p;\n"
+	"setp.ne.b32 p, %6, 0;\n"
+	"wgmma.mma_async.sync.aligned.m64n8k32.f32.e4m3.e4m3 "
+	"{%0,  %1,  %2,  %3},"
+	" %4,"
+	" %5,"
+	" p,   %7,  %8;\n"
+	"}\n"
+	: "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+	: "l"(descA),
+	  "l"(descB),
+	  "n"(int32_t(scale_D)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
 }
 
 
@@ -278,17 +315,19 @@ __global__ void matmul_fp8_64x8x32_kernel(
 
 	// here, fiber reads the 1st 2xfp16, and next 2xfp16
 	// noted that, we only care about the c0 input 
-	uint32_t c0 = C[2*tid + 0];
-	uint32_t c1 = C[2*tid + 1];
+	uint32_t c0 = C[0];
+	uint32_t c1 = 0;
+	uint32_t c2 = 0;
+	uint32_t c3 = 0;
 
 	// Start the WGMMA group
 	wgmma_fence();
 
 	// Choose WGMMA implementation based on format
 	if constexpr (FORMAT == FP8Format::E5M2) {
-		wgmma_m64n8k32_f16_e5m2_e5m2<1,1,1>(descA, descB, c0, c1);
+		wgmma_m64n8k32_f32_e5m2_e5m2<1,1,1>(descA, descB, c0, c1, c2, c3);
 	} else {
-		wgmma_m64n8k32_f16_e4m3_e4m3<1,1,1>(descA, descB, c0, c1);
+		wgmma_m64n8k32_f32_e4m3_e4m3<1,1,1>(descA, descB, c0, c1, c2, c3);
 	}
 
 	// Commit, then wait for group 0
@@ -304,16 +343,10 @@ __global__ void matmul_fp8_64x8x32_kernel(
 	if(tid == 0) {
 		C[tid] = c0;
 	}
-	// C[2 * store_idx + 0] = c0;
-	//C[2 * store_idx + 1] = c1;
 
-	// print the lower half of c0
-	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
-        uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 #if DEBUG
 	if(tid == 0) {
-		printf("kernel: tid=%d c0_lo=0x%4X \n", tid, c0_lo);
-		// printf("[tid=%d] c0_lo=0x%4X c0_hi=0x%4X  \n", tid, c0_lo, c0_hi);
+		printf("kernel: tid=%d c0=0x%8X \n", tid, c0);
 	}
 #endif
 }
@@ -369,7 +402,7 @@ int main(int argc, char **argv)
 	// 65 input values per row:   c +  32 of a/b for K32 case
 	// 33 input values per row:   c +  16 of a/b for K16 case
 	// 17 input values per row:   c +   8 of a/b for  K8 case
-	std::vector<uint16_t> allTests_c;               // input c in f16
+	std::vector<uint32_t> allTests_c;               // input c in fp32
 	std::vector<std::vector<uint8_t>> allTests_ab;  // input a/b in fp8
 
 	std::cout << "file : " << argv[1] << std::endl;
@@ -397,7 +430,7 @@ int main(int argc, char **argv)
 
 		// read c first
 		iss >> hexStr;
-		uint16_t num_c = static_cast<uint16_t>(std::stoul(hexStr, nullptr, 16));
+		uint32_t num_c = static_cast<uint32_t>(std::stoul(hexStr, nullptr, 16));  // was uint16_t
 		allTests_c.push_back(num_c); // store current line for C
 
 		// read a/b
@@ -434,7 +467,7 @@ int main(int argc, char **argv)
     //------------------------------------------------------------------------//
 #if 1 
     printf("\nCheck first line of input file:\n");
-    printf("%04X ", allTests_c[0]);
+    printf("%08X ", allTests_c[0]);
     for (int i = 0; i < 64; i++)
     {
         printf("%02X ", allTests_ab[0][i]);
@@ -459,11 +492,11 @@ int main(int argc, char **argv)
 	if((i%1000) == 0)  logMessage("case : %zu (%zu : %.2f %% done) \n", i,  totalNum, (i/(float)totalNum)*100);  // Change format specifier from %d to %zu for size_t
 
 		// each test inputs
-		uint16_t current_test_c = allTests_c[i];
+		uint32_t current_test_c = allTests_c[i];
 		std::vector<uint8_t> current_test_ab = allTests_ab[i];
 
 		// output in fp16
-		std::vector<uint16_t> current_result;
+		std::vector<uint32_t> current_result;
 
 		//--------------------------------------------------------------------//
 		// run tensor core test
@@ -493,7 +526,7 @@ int main(int argc, char **argv)
     {
         for (int j = 0; j < colNum; j++)
         {
-            outFile << std::setfill('0') << std::setw(4) << std::hex << allTests_results[i][j];
+            outFile << std::setfill('0') << std::setw(8) << std::hex << allTests_results[i][j];  // width changed from 4 to 8
             // if (j < colNum) outFile << " "; // separate with space
         }
         outFile << "\n"; // EOR
@@ -511,8 +544,8 @@ int main(int argc, char **argv)
 //----------------------------------------------------------------------------//
 template <int TILE_K, FP8Format FORMAT>
 void runTest(std::vector<uint8_t> current_test_ab,
-			 uint16_t current_test_c,
-			 std::vector<uint16_t> &current_result)
+			 uint32_t current_test_c,
+			 std::vector<uint32_t> &current_result)
 {
 	//  C in f16 , A and B in FP8
 
@@ -559,21 +592,18 @@ void runTest(std::vector<uint8_t> current_test_ab,
 
         // NxK
 		uint8_t val_b = current_test_ab[i * 2 + 1]; //  read b
-                hB[i] = val_b;
+        hB[i] = val_b;
 	}
 
 
 #if DEBUG
 	std::cout << "Read input C" << std::endl;
 #endif
-	// pack fp16 into a 32 bit register
-	uint32_t packed = 0;
-	packed |= (uint32_t)current_test_c & 0xFFFF;    // put low half 
-	// packed |= ((uint32_t)half_hi & 0xFFFF) << 16;    // put high half 
-	hD[0] = packed; 
+
+	hD[0] = (uint32_t) current_test_c; 
 
 #if DEBUG
-    printf("Pack input C (fp16) into 32bit register : %08X \n\n", hD[0]);
+    printf("Pack input C (fp32) : %08X \n\n", hD[0]);
 #endif
 
 
@@ -595,25 +625,23 @@ void runTest(std::vector<uint8_t> current_test_ab,
 	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeD, cudaMemcpyHostToDevice);
 
 	// Launch a single block with 128 threads => "1 warpgroup" (4 warps, 32 threads per warp)
-        matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
+    matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
 
 	// d2h : copy results back to host
 	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeD, cudaMemcpyDeviceToHost);
 
 	uint32_t c0 = hresult[0];
-	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);   // read the lower half (1st 16 bits)
+	// uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);   // read the lower half (1st 16 bits)
 	// uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 
 // check value
 #if DEBUG
 	printf("%08X\n", hresult[0]);
-	printf("c0_lo=0x%04X \n", c0_lo);
-	// printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
 #endif
 
 	//printf("\n\n");
 
-	current_result.push_back(c0_lo);
+	current_result.push_back(c0);
 
 	cudaFree(dA);
 	cudaFree(dB);
