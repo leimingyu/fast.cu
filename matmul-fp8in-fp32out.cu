@@ -173,7 +173,7 @@ void wgmma_m64n8k32_f32_e5m2_e5m2(
       " %5,"
       " p,   %7,  %8;\n"
     "}\n"
-      : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+      : "+r"(d0), "+r"(d1), "+r"(d2), "+r"(d3)
       :  "l"(descA),
          "l"(descB),
          "n"(int32_t(scaleD)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
@@ -219,7 +219,7 @@ asm volatile(
 	" %5,"
 	" p,   %7,  %8;\n"
 	"}\n"
-	: "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+	: "+r"(d0), "+r"(d1), "+r"(d2), "+r"(d3)
 	: "l"(descA),
 	  "l"(descB),
 	  "n"(int32_t(scaleD)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)));
