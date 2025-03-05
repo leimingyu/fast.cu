@@ -19,7 +19,7 @@ for test_file in "$TEST_DIR"/*.txt; do
     
     # Run test for e5m2
     echo "Running e5m2 test for $filename..."
-    if ./out/matmul-fp8in-fp16out "$test_file" e5m2 ${gpu_dev}; then
+    if ./out/matmul-fp8in-fp32out "$test_file" e5m2 ${gpu_dev}; then
         if [ -f "gpu_output.txt" ]; then
             mv gpu_output.txt "${filename%.*}-result-e5m2.txt"
             echo "Successfully created ${filename%.*}-result-e5m2.txt"
