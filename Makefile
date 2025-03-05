@@ -34,11 +34,14 @@ NVCC_BASE = nvcc $(NVCC_FLAGS) $(NVCC_LDFLAGS) -lineinfo $(NVCC_INCLUDES) $(NVCC
 $(OUT_DIR):
 	mkdir -p $(OUT_DIR)
 
-matmul: $(OUT_DIR) matmul.cu
-	$(NVCC_BASE) matmul.cu $(CUDA_OUTPUT_FILE)
+#matmul: $(OUT_DIR) matmul.cu
+#	$(NVCC_BASE) matmul.cu $(CUDA_OUTPUT_FILE)
 
-##matmulprofile: matmul
-##	$(NCU_COMMAND) -o $@ -f $(OUT_DIR)/$^
+matmul-fp8in-fp16out: $(OUT_DIR) matmul-fp8in-fp16out.cu
+	$(NVCC_BASE) matmul-fp8in-fp16out.cu $(CUDA_OUTPUT_FILE)
+
+matmul-fp8in-fp32out: $(OUT_DIR) matmul-fp8in-fp32out.cu
+	$(NVCC_BASE) matmul-fp8in-fp32out.cu $(CUDA_OUTPUT_FILE)
 
 clean:
 	rm $(OUT_DIR)/*
