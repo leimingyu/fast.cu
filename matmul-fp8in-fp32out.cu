@@ -483,8 +483,8 @@ int main(int argc, char **argv)
     // Change from int to size_t for totalNum
     size_t totalNum = allTests_ab.size();
 
-    // results in fp16 
-    std::vector<std::vector<uint16_t>> allTests_results(totalNum);
+    // results in fp32 
+    std::vector<std::vector<uint32_t>> allTests_results(totalNum);
 
     for (size_t i = 0; i < totalNum; i++)  // Change loop variable type to match
     {
@@ -495,7 +495,7 @@ int main(int argc, char **argv)
 		uint32_t current_test_c = allTests_c[i];
 		std::vector<uint8_t> current_test_ab = allTests_ab[i];
 
-		// output in fp16
+		// output in fp32
 		std::vector<uint32_t> current_result;
 
 		//--------------------------------------------------------------------//
