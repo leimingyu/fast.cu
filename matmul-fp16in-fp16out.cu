@@ -407,31 +407,31 @@ int main(int argc, char **argv)
 		allTests_results[i] = current_result;
 	}
 
-    // //------------------------------------------------------------------------//
-    // // Save to txt file 
-    // //------------------------------------------------------------------------//
-    // std::string outFileName = "gpu_output.txt";
-    // std::ofstream outFile(outFileName);
-    // if (!outFile)
-    // {
-    //     std::cerr << "Error opening file to write." << std::endl;
-    //     return 1;
-    // }
+    //------------------------------------------------------------------------//
+    // Save to txt file 
+    //------------------------------------------------------------------------//
+    std::string outFileName = "gpu_output.txt";
+    std::ofstream outFile(outFileName);
+    if (!outFile)
+    {
+        std::cerr << "Error opening file to write." << std::endl;
+        return 1;
+    }
 
-    // const int colNum = 1;
-    // for (size_t i = 0; i < totalNum; i++)
-    // {
-    //     for (int j = 0; j < colNum; j++)
-    //     {
-    //         outFile << std::setfill('0') << std::setw(4) << std::hex << allTests_results[i][j];
-    //         // if (j < colNum) outFile << " "; // separate with space
-    //     }
-    //     outFile << "\n"; // EOR
-    // }
+    const int colNum = 1;
+    for (size_t i = 0; i < totalNum; i++)
+    {
+        for (int j = 0; j < colNum; j++)
+        {
+            outFile << std::setfill('0') << std::setw(4) << std::hex << allTests_results[i][j];
+            // if (j < colNum) outFile << " "; // separate with space
+        }
+        outFile << "\n"; // EOR
+    }
 
-    // outFile.close();
+    outFile.close();
 
-    // std::cout << "\nResults are saved! Check " << outFileName << ".\n";
+    std::cout << "\nResults are saved! Check " << outFileName << ".\n";
 
     return 0;
 };
