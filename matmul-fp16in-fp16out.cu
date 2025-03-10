@@ -23,7 +23,7 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 0
+#define DEBUG 1
 #define K16  16	
 
 // https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L128-L173
@@ -468,12 +468,14 @@ void runTest(std::vector<uint16_t> current_test_ab,
 
 	hA = (uint16_t *)malloc(sizeof(uint16_t) * sizeA);
 	hB = (uint16_t *)malloc(sizeof(uint16_t) * sizeB);
+
 	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
 	hresult = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
 
 	// init to 0
 	memset(hA, 0, sizeof(uint16_t) * sizeA);
 	memset(hB, 0, sizeof(uint16_t) * sizeB);
+
 	memset(hD, 0, sizeof(uint32_t) * sizeD);
 	memset(hresult, 0, sizeof(uint32_t) * sizeD);
 
@@ -490,7 +492,7 @@ void runTest(std::vector<uint16_t> current_test_ab,
 
         // NxK
 		uint16_t val_b = current_test_ab[i * 2 + 1]; //  read b
-                hB[i] = val_b;
+        hB[i] = val_b;
 	}
 
 
