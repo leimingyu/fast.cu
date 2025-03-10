@@ -120,12 +120,9 @@ __device__ __forceinline__ void wgmma_wait_group() {
 }
 
 
-//////////////////////////////////////////////////////////////////////////////
-// Minimal inline PTX for wgmma.mma_async.sync.aligned.m64n8k32.f16.f16.f16
+// https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L128-L172
+// "wgmma.mma_async.sync.aligned.m64n8k16.f16.f16.f16 "
 // storing two 32-bit accumulators (c0, c1).
-//////////////////////////////////////////////////////////////////////////////
-
-// ref:  https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L19019C1-L19052C3
 
 template<int scaleD, int scaleA, int scaleB, int TransA, int TransB>
 __device__ __forceinline__
@@ -445,12 +442,12 @@ void runTest(std::vector<uint16_t> current_test_ab,
 			 uint16_t current_test_c,
 			 std::vector<uint16_t> &current_result)
 {
-	//  C in f16 , A and B in FP8
+	//  C in FP16 , A and B in FP16
 
 	//------------------------------------------------------------------------//
 	// total workload size M 64 x N 8 x K16 
 	//------------------------------------------------------------------------//
-	long max_size = 64;
+	//long max_size = 64;
 	long M = 64, N = 8, K = 16;
 
 	//------------------------------------------------------------------------//
@@ -469,14 +466,14 @@ void runTest(std::vector<uint16_t> current_test_ab,
 	hA = (uint16_t *)malloc(sizeof(uint16_t) * sizeA);
 	hB = (uint16_t *)malloc(sizeof(uint16_t) * sizeB);
 
-	hD = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
+	hD      = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
 	hresult = (uint32_t *)malloc(sizeof(uint32_t) * sizeD);
 
 	// init to 0
 	memset(hA, 0, sizeof(uint16_t) * sizeA);
 	memset(hB, 0, sizeof(uint16_t) * sizeB);
 
-	memset(hD, 0, sizeof(uint32_t) * sizeD);
+	memset(hD,      0, sizeof(uint32_t) * sizeD);
 	memset(hresult, 0, sizeof(uint32_t) * sizeD);
 
 	//------------------------------------------------------------------------//
@@ -487,12 +484,11 @@ void runTest(std::vector<uint16_t> current_test_ab,
 #endif
 	for (int i = 0; i < TILE_K; i++)
 	{
-        // MxK:   only first 32 elements are intiliazed, the rest are 0
+		// MxK:   only first 32 elements are intiliazed, the rest are 0
 		hA[i] = current_test_ab[i * 2];		//  read a
-
-        // NxK
+		// NxK
 		uint16_t val_b = current_test_ab[i * 2 + 1]; //  read b
-        hB[i] = val_b;
+		hB[i] = val_b;
 	}
 
 
@@ -527,7 +523,7 @@ void runTest(std::vector<uint16_t> current_test_ab,
 	cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeD, cudaMemcpyHostToDevice);
 
 	// Launch a single block with 128 threads => "1 warpgroup" (4 warps, 32 threads per warp)
-    matmul_fp16_64x8x16_kernel<<<1, 128>>>(dA, dB, dD);
+	matmul_fp16_64x8x16_kernel<<<1, 128>>>(dA, dB, dD);
 
 	// d2h : copy results back to host
 	cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeD, cudaMemcpyDeviceToHost);
