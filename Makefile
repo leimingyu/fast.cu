@@ -27,6 +27,7 @@ NVCC_FLAGS += --expt-relaxed-constexpr --expt-extended-lambda --use_fast_math -X
 # NVCC_FLAGS += --ptxas-options=-v #,--register-usage-level=10
 # NVCC_FLAGS += -gencode arch=compute_90a,code=sm_90a -Xnvlink=--verbose -Xptxas=--verbose -Xptxas=--warn-on-spills
 
+# hopper gpu
 NVCC_FLAGS += -arch=sm_90a
 
 NVCC_BASE = nvcc $(NVCC_FLAGS) $(NVCC_LDFLAGS) -lineinfo $(NVCC_INCLUDES) $(NVCC_LDLIBS)
@@ -42,6 +43,9 @@ matmul-fp8in-fp16out: $(OUT_DIR) matmul-fp8in-fp16out.cu
 
 matmul-fp8in-fp32out: $(OUT_DIR) matmul-fp8in-fp32out.cu
 	$(NVCC_BASE) matmul-fp8in-fp32out.cu $(CUDA_OUTPUT_FILE)
+
+matmul-fp16in-fp16out: $(OUT_DIR) matmul-fp16in-fp16out.cu
+	$(NVCC_BASE) matmul-fp16in-fp16out.cu $(CUDA_OUTPUT_FILE)
 
 clean:
 	rm $(OUT_DIR)/*
