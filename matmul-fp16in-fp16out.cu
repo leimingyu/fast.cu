@@ -164,11 +164,11 @@ __global__ void matmul_fp16_64x8x16_kernel(
 	//__shared__ uint8_t sA[64 * 32]; // 2048 bytes
 	//__shared__ uint8_t sB[32 * 8];  // 256 bytes
 
-	// __shared__ alignas(128) uint16_t sA[64 * 32];
-	// __shared__ alignas(128) uint16_t sB[32 * 8];
+	__shared__ alignas(128) uint16_t sA[64 * 32];
+	__shared__ alignas(128) uint16_t sB[32 * 8];
 
-	__shared__ alignas(128) uint16_t sA[64 * 16];
-	__shared__ alignas(128) uint16_t sB[16 * 8];
+	// __shared__ alignas(128) uint16_t sA[64 * 16];
+	// __shared__ alignas(128) uint16_t sB[16 * 8];
 
 	// We'll do naive copy from global to shared:
 	int tid = threadIdx.x;
@@ -196,25 +196,25 @@ __global__ void matmul_fp16_64x8x16_kernel(
 
 
 	
-	if(tid == 0) 
-	{
-		printf("\nsA\n");
-		for (int i = 0; i < 64 * 16; i++)
+	// if(tid == 0) 
+	// {
+	// 	printf("\nsA\n");
+	// 	for (int i = 0; i < 64 * 16; i++)
 
-		{
-			if((i % 16) == 0) printf("\n");
-			printf("%4X ", sA[i]);
-		}
-		printf("\n");
+	// 	{
+	// 		if((i % 16) == 0) printf("\n");
+	// 		printf("%4X ", sA[i]);
+	// 	}
+	// 	printf("\n");
 
-		printf("\nsB\n");
-		for (int i = 0; i < 16 * 8; i++)
-		{
-			if((i % 16) == 0) printf("\n");
-			printf("%4X ", sB[i]);
-		}
-		printf("\n");
-	}
+	// 	printf("\nsB\n");
+	// 	for (int i = 0; i < 16 * 8; i++)
+	// 	{
+	// 		if((i % 16) == 0) printf("\n");
+	// 		printf("%4X ", sB[i]);
+	// 	}
+	// 	printf("\n");
+	// }
 	
 
 	// Build SMEM descriptors for A/B. No swizzle.
