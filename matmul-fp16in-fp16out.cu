@@ -23,7 +23,7 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 1
+#define DEBUG 0
 #define K16  16	
 
 // https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L128-L173
@@ -161,14 +161,8 @@ __global__ void matmul_fp16_64x8x16_kernel(
 	uint32_t *C)	
 {
 	// We'll copy entire A and B into SMEM. (No TMA, no advanced cp.async.)
-	//__shared__ uint8_t sA[64 * 32]; // 2048 bytes
-	//__shared__ uint8_t sB[32 * 8];  // 256 bytes
-
-	__shared__ alignas(128) uint16_t sA[64 * 32];
-	__shared__ alignas(128) uint16_t sB[32 * 8];
-
-	// __shared__ alignas(128) uint16_t sA[64 * 16];
-	// __shared__ alignas(128) uint16_t sB[16 * 8];
+	__shared__ alignas(128) uint16_t sA[64 * 64];
+	__shared__ alignas(128) uint16_t sB[64 * 64];
 
 	// We'll do naive copy from global to shared:
 	int tid = threadIdx.x;
