@@ -199,25 +199,25 @@ __global__ void matmul_fp16_64x8x16_kernel(
 
 
 	
-	// if(tid == 0) 
-	// {
-		// printf("\nsA\n");
-		// for (int i = 0; i < 64 * 32; i++)
-// 
-		// {
-			// if((i % 32) == 0) printf("\n");
-			// printf("%2X ", sA[i]);
-		// }
-		// printf("\n");
-// 
-		// printf("\nsB\n");
-		// for (int i = 0; i < 32 * 8; i++)
-		// {
-			// if((i % 32) == 0) printf("\n");
-			// printf("%2X ", sB[i]);
-		// }
-		// printf("\n");
-	// }
+	if(tid == 0) 
+	{
+		printf("\nsA\n");
+		for (int i = 0; i < 64 * 16; i++)
+
+		{
+			if((i % 16) == 0) printf("\n");
+			printf("%4X ", sA[i]);
+		}
+		printf("\n");
+
+		printf("\nsB\n");
+		for (int i = 0; i < 16 * 8; i++)
+		{
+			if((i % 16) == 0) printf("\n");
+			printf("%4X ", sB[i]);
+		}
+		printf("\n");
+	}
 	
 
 	// Build SMEM descriptors for A/B. No swizzle.
@@ -258,7 +258,7 @@ __global__ void matmul_fp16_64x8x16_kernel(
 
 	// print the lower half of c0
 	uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);
-    uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+    //uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
 #if DEBUG
 	if(tid == 0) {
 		printf("kernel: tid=%d c0_lo=0x%4X \n", tid, c0_lo);
@@ -538,7 +538,7 @@ void runTest(std::vector<uint16_t> current_test_ab,
 
 #if DEBUG
 	printf("%08X\n", hresult[0]);
-	printf("c0_lo=0x%04X \n", c0_lo);
+	printf("c0_lo=0x%04X \n\n", c0_lo);
 	// printf("[tid=0] c0_lo=0x%04X c0_hi=0x%04X \n", c0_lo, c0_hi);
 #endif
 
