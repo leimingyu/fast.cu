@@ -23,7 +23,7 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 1
+#define DEBUG 0
 #define K16  16	
 
 // ref: https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L1064-L1104
