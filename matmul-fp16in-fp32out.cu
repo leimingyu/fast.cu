@@ -23,11 +23,19 @@
 #include <cuda_runtime.h>
 
 
-#define DEBUG 0
+#define DEBUG 1
 #define K16  16	
 
 // ref: https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm90_gmma.hpp#L1064-L1104
 // 64x8x16 WMMA
+
+//----------------------------------------------------------------------------//
+// Functions 
+//----------------------------------------------------------------------------//
+template <int TILE_K>
+void runTest(std::vector<uint16_t> current_test_ab,
+			 uint32_t current_test_c,
+			 std::vector<uint32_t> &current_result);
 
 //----------------------------------------------------------------------------//
 // Utility 
@@ -61,14 +69,6 @@ void cudaCheck(cudaError_t error, const char *file, int line) {
 }
 
 #define cudaCheck(err) (cudaCheck(err, __FILE__, __LINE__))
-
-//----------------------------------------------------------------------------//
-// Functions 
-//----------------------------------------------------------------------------//
-template <int TILE_K>
-void runTest(std::vector<uint16_t> current_test_ab,
-             uint32_t current_test_c,
-             std::vector<uint16_t> &current_result);
 
 
 //----------------------------------------------------------------------------//
@@ -145,10 +145,10 @@ void wgmma_m64n8k16_f32_f16_f16(
       " %5,"
       " p,   %7,  %8,  %9,  %10;\n"
     "}\n"
-      : "+f"(d0), "+f"(d1), "+f"(d2), "+f"(d3)
+      : "+r"(d0), "+r"(d1), "+r"(d2), "+r"(d3)
       :  "l"(descA),
          "l"(descB),
-         "n"(int32_t(scale_D)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
+         "n"(int32_t(scaleD)), "n"(int32_t(scaleA)), "n"(int32_t(scaleB)), "n"(int32_t(TransA)), "n"(int32_t(TransB)));
 
 }
 
