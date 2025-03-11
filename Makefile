@@ -47,5 +47,8 @@ matmul-fp8in-fp32out: $(OUT_DIR) matmul-fp8in-fp32out.cu
 matmul-fp16in-fp16out: $(OUT_DIR) matmul-fp16in-fp16out.cu
 	$(NVCC_BASE) matmul-fp16in-fp16out.cu $(CUDA_OUTPUT_FILE)
 
+matmul-fp16in-fp32out: $(OUT_DIR) matmul-fp16in-fp32out.cu
+	$(NVCC_BASE) matmul-fp16in-fp32out.cu $(CUDA_OUTPUT_FILE)
+
 clean:
 	rm $(OUT_DIR)/*
