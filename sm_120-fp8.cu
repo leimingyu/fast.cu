@@ -8,6 +8,8 @@
 //----------------------------------------------------------------------------//
 
 
+// https://github.com/NVIDIA/cutlass/blob/main/include/cute/arch/mma_sm100_umma.hpp
+
 #include <assert.h>
 #include <stdio.h>
 #include <iostream>
@@ -15,8 +17,12 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <cstdlib>
 #include <iomanip> // setfill, setw
+
+#include <ctime>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint> // int8_t, uint8_t
 
 
@@ -100,6 +106,137 @@ void runTest(std::vector<std::vector<uint8_t>> &current_test_ab,
 //----------------------------------------------------------------------------//
 // gpu kernel
 //----------------------------------------------------------------------------//
+
+template<FP8Format FORMAT>
+__global__ void matmul_fp8_64x8x32_kernel(
+	const uint8_t *A, // [64*32] = 2048 bytes x Test_num
+	const uint8_t *B, // [32*8 ] = 256  bytes x Test_num
+	uint32_t *C)	// 64 x 8 x Test_num
+{
+	// We'll copy entire A and B into SMEM. (No TMA, no advanced cp.async.)
+	//__shared__ uint8_t sA[64 * 32]; // 2048 bytes
+	//__shared__ uint8_t sB[32 * 8];  // 256 bytes
+
+	__shared__ alignas(128) uint8_t sA[64 * 64];
+	__shared__ alignas(128) uint8_t sB[64 * 64];
+
+	// We'll do naive copy from global to shared:
+	int tid = threadIdx.x;
+
+	// set shared memory to 0
+	for (int i = tid; i < 64 * 32; i += blockDim.x)
+	{
+		// sA[i] = A[i];
+		sA[i] = 0;
+	}
+
+	for (int i = tid; i < 32 * 8; i += blockDim.x)
+	{
+		// sB[i] = B[i];
+		sB[i] = 0; 
+	}
+	__syncthreads();
+
+	// read only the first 32 elements of A and B
+	if(tid < 32) {
+		//sA[tid * 64] = A[tid];
+		//sB[tid*8] = B[tid]; // KxN
+
+		//// try1: A is MxK, B is NxK
+		sA[tid] = A[tid];
+		//sA[tid+32] = A[tid];
+		//sA[tid+64] = A[tid];
+		sB[tid] = B[tid];
+		//sB[tid+32] = B[tid];
+		//sB[tid+64] = B[tid];
+	}	
+	__syncthreads();
+
+
+	/*
+	if(tid == 0) 
+	{
+		printf("\nsA\n");
+		for (int i = 0; i < 64 * 32; i++)
+
+		{
+			if((i % 32) == 0) printf("\n");
+			printf("%2X ", sA[i]);
+		}
+		printf("\n");
+
+		printf("\nsB\n");
+		for (int i = 0; i < 32 * 8; i++)
+		{
+			if((i % 32) == 0) printf("\n");
+			printf("%2X ", sB[i]);
+		}
+		printf("\n");
+	}
+	*/
+
+	// Build SMEM descriptors for A/B. No swizzle.
+
+	//-----------//
+	// try1 :
+	//-----------//
+	uint64_t descA = make_smem_desc(&sA[0], 16, 1024);
+	uint64_t descB = make_smem_desc(&sB[0], 16, 1024);
+
+	// Our accumulators: 2 x 32-bit registers => 4 total fp16 values
+	// C is 64x8 , each warp read 16x8 of inputC, there are 32 threads per warp, so each fiber hold 4 input values.
+	// ideally, we would like fiber0 holds the 1st 2 inputs, the offset by 8x8 elements, hold the 2nd 2 inputs.
+
+	// here, fiber reads the 1st 2xfp16, and next 2xfp16
+	// noted that, we only care about the c0 input 
+	uint32_t c0 = C[0];
+	uint32_t c1 = 0;
+	uint32_t c2 = 0;
+	uint32_t c3 = 0;
+
+	// Start the WGMMA group
+	wgmma_fence();
+
+	// Choose WGMMA implementation based on format
+	if constexpr (FORMAT == FP8Format::E5M2) {
+		uint32_t mask[4] = {0, 0, 0, 0};
+		uint64_t idescE = 0; // You'll need to set this appropriately
+		uint32_t scaleC = 1; // You'll need to set this appropriately
+		
+		asm volatile(
+			"{\n\t"
+			".reg .pred p;\n\t"
+			"setp.ne.b32 p, %4, 0;\n\t"
+			"tcgen05.mma.cta_group::1.kind::f8f6f4 [%0], %1, %2, %3, {%5, %6, %7, %8}, p; \n\t"
+			"}\n"
+			:
+			: "r"(c0), "l"(descA), "l"(descB), "r"(uint32_t(idescE>>32)), "r"(scaleC),
+			  "r"(mask[0]), "r"(mask[1]), "r"(mask[2]), "r"(mask[3]));
+	} else {
+		// Similar for E4M3 format
+		// ... 
+	}
+
+	// Commit, then wait for group 0
+	wgmma_commit_group();
+	wgmma_wait_group<0>();
+
+	// Now c0,c1 each hold two FP16 accumulators. In a real code,
+	// you'd map lane IDs carefully to store each portion of the 64x8 tile.
+	// For demonstration, we simply store c0,c1 from each thread to global mem.
+
+	// matrix C is 64x8
+	int store_idx = tid; // 0..127
+	if(tid == 0) {
+		C[tid] = c0;
+	}
+
+#if DEBUG
+	if(tid == 0) {
+		printf("kernel: tid=%d c0=0x%8X \n", tid, c0);
+	}
+#endif
+}
 
 
 //----------------------------------------------------------------------------//
@@ -268,13 +405,10 @@ int main(int argc, char **argv)
     //------------------------------------------------------------------------//
     // Run all test cases
     //------------------------------------------------------------------------//
-    std::cout << "Run Tensor Core Tests with " << format_str << " format\n"
-              << std::endl;
-
+    std::cout << "Run Tensor Core Tests with " << format_str << " format\n" << std::endl;
 
     // Change from int to size_t for totalNum
     size_t totalNum = allTests_ab.size();
-
 
     // results in fp32
     std::vector<uint32_t> allTests_results(totalNum);
@@ -288,18 +422,14 @@ int main(int argc, char **argv)
         size_t start_idx = i * SM_NUM;
         size_t end_idx = std::min(start_idx + SM_NUM, totalNum);
 
-
         if ((end_idx % 1000) == 0)
             logMessage("case : %zu (%zu : %.2f %% done) \n", end_idx, totalNum, (end_idx / (float)totalNum) * 100);
 
-
         size_t test_counts = end_idx - start_idx;
-
 
         // Create tests for this batch from allTests_c and allTests_ab.
         std::vector<uint32_t> partTests_c(allTests_c.begin() + start_idx, allTests_c.begin() + end_idx);
         std::vector<std::vector<uint8_t>> partTests_ab(allTests_ab.begin() + start_idx, allTests_ab.begin() + end_idx);
-
 
         // output in fp32
         std::vector<uint32_t> current_result(test_counts);
@@ -307,9 +437,10 @@ int main(int argc, char **argv)
 
         //--------------------------------------------------------------------//
         // run tensor core test
+        // each batch will work on the # of test_counts, each SM will work one test
         //--------------------------------------------------------------------//
         if (use_e5m2)
-        { // Add a command line argument or configuration to set this
+        {
             runTest<K32, FP8Format::E5M2>(partTests_ab, partTests_c, current_result, SM_NUM);
         }
         else
@@ -317,9 +448,10 @@ int main(int argc, char **argv)
             // runTest<K32, FP8Format::E4M3>(partTests_ab, partTests_c, current_result);
         }
 
-
-        // update the test results
-        std::copy(current_result.begin(), current_result.end(), allTests_results.begin() + start_idx);
+        // pass results to allTests_results
+        std::copy(current_result.begin(),
+                  current_result.end(),
+                  allTests_results.begin() + start_idx);
     }
 
 
@@ -434,7 +566,6 @@ void runTest(std::vector<std::vector<uint8_t>> &current_test_ab,
     //------------------------------------------------------------------------//
     // read a/b for each test case in the batch
     for (int test = 0; test < test_batch_size; test++) {
-
         // Calculate base offsets for this test case
         size_t a_offset = test * M * K;  // Offset in hA array
         size_t b_offset = test * N * K;  // Offset in hB array
@@ -452,9 +583,6 @@ void runTest(std::vector<std::vector<uint8_t>> &current_test_ab,
         hD[d_offset] = (uint32_t)current_test_c[test];
     }
 
-
-
-
 // #if DEBUG
 //     std::cout << "Read input C" << std::endl;
 // #endif
@@ -463,7 +591,6 @@ void runTest(std::vector<std::vector<uint8_t>> &current_test_ab,
 // #if DEBUG
 //     printf("Pack input C (fp32) : %08X \n\n", hD[0]);
 // #endif
-
 
 
 
@@ -478,43 +605,39 @@ void runTest(std::vector<std::vector<uint8_t>> &current_test_ab,
     cudaMalloc((void **)&dB, sizeof(uint8_t) * sizeB);
     cudaMalloc((void **)&dD, sizeof(uint32_t) * sizeD);
 
+    //------------------------------------------------------------------------//
     // h2d : copy input ops to gpu
+    //------------------------------------------------------------------------//
     cudaMemcpy(dA, hA, sizeof(uint8_t) * sizeA, cudaMemcpyHostToDevice);
     cudaMemcpy(dB, hB, sizeof(uint8_t) * sizeB, cudaMemcpyHostToDevice);
     cudaMemcpy(dD, hD, sizeof(uint32_t) * sizeD, cudaMemcpyHostToDevice);
 
-
+    //------------------------------------------------------------------------//
+    // gpu kernel 
+    //------------------------------------------------------------------------//
     // Launch a single block with 128 threads => "1 warpgroup" (4 warps, 32 threads per warp)
-    //matmul_fp8_64x8x32_kernel<FORMAT><<<1, 128>>>(dA, dB, dD);
+    matmul_fp8_64x8x32_kernel<FORMAT><<<test_batch_size, 128>>>(dA, dB, dD);
 
 
+    //------------------------------------------------------------------------//
     // d2h : copy results back to host
+    //------------------------------------------------------------------------//
     cudaMemcpy(hresult, dD, sizeof(uint32_t) * sizeD, cudaMemcpyDeviceToHost);
 
     // note: read the 1st element of each MxN block
-
-    /*
-    uint32_t c0 = hresult[0];
-    // uint16_t c0_lo = static_cast<uint16_t>(c0 & 0xFFFF);   // read the lower half (1st 16 bits)
-    // uint16_t c0_hi = static_cast<uint16_t>((c0 >> 16) & 0xFFFF);
+    for (int test = 0; test < test_batch_size; test++) {
+        current_result[test] = dD[test * M * N];
+    }
 
 
-// check value
-#if DEBUG
-    printf("%08X\n", hresult[0]);
-#endif
-
-
-    //printf("\n\n");
-
-
-    current_result.push_back(c0);
-
+// // check value
+// #if DEBUG
+//     printf("%08X\n", hresult[0]);
+// #endif
 
     cudaFree(dA);
     cudaFree(dB);
     cudaFree(dD);
-
 
     free(hA);
     free(hB);
@@ -523,5 +646,4 @@ void runTest(std::vector<std::vector<uint8_t>> &current_test_ab,
 
 
     cudaDeviceSynchronize();
-    */
 }
